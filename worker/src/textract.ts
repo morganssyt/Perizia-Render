@@ -11,6 +11,7 @@ import {
   StartDocumentTextDetectionCommand,
   GetDocumentTextDetectionCommand,
   type Block,
+  type GetDocumentTextDetectionCommandOutput,
 } from '@aws-sdk/client-textract';
 
 const REGION     = process.env.AWS_REGION           ?? 'eu-central-1';
@@ -70,7 +71,7 @@ async function pollUntilDone(
       if (nextToken) {
         // Loop back to fetch next page of blocks (status is already SUCCEEDED)
         while (nextToken) {
-          const more = await client.send(new GetDocumentTextDetectionCommand({
+          const more: GetDocumentTextDetectionCommandOutput = await client.send(new GetDocumentTextDetectionCommand({
             JobId:     jobId,
             NextToken: nextToken,
           }));

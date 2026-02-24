@@ -30,22 +30,22 @@ const ExtractionSchema = z.object({
   valore_perito: z.object({
     status:     z.enum(['found', 'not_found']),
     value:      z.string().nullable(),
-    confidence: z.number().min(0).max(1).default(0.5),
+    confidence: z.number().min(0).max(1).optional().transform(v => v ?? 0.5),
   }),
   atti_antecedenti: z.object({
     status:     z.enum(['found', 'not_found']),
     summary:    z.string().nullable(),
-    confidence: z.number().min(0).max(1).default(0.5),
+    confidence: z.number().min(0).max(1).optional().transform(v => v ?? 0.5),
   }),
   costi_oneri: z.object({
     status:     z.enum(['found', 'not_found']),
     summary:    z.string().nullable(),
-    confidence: z.number().min(0).max(1).default(0.5),
+    confidence: z.number().min(0).max(1).optional().transform(v => v ?? 0.5),
   }),
   difformita: z.object({
     status:     z.enum(['found', 'not_found']),
     summary:    z.string().nullable(),
-    confidence: z.number().min(0).max(1).default(0.5),
+    confidence: z.number().min(0).max(1).optional().transform(v => v ?? 0.5),
   }),
   riassunto: z.object({
     paragrafo1: z.string(),
@@ -69,7 +69,13 @@ const ReasoningSchema = z.object({
   sintesi_esito: z.enum(['verde', 'giallo', 'rosso']),
 });
 
-export type ExtractionResult = z.infer<typeof ExtractionSchema>;
+export interface ExtractionResult {
+  valore_perito:    { status: 'found' | 'not_found'; value: string | null; confidence: number };
+  atti_antecedenti: { status: 'found' | 'not_found'; summary: string | null; confidence: number };
+  costi_oneri:      { status: 'found' | 'not_found'; summary: string | null; confidence: number };
+  difformita:       { status: 'found' | 'not_found'; summary: string | null; confidence: number };
+  riassunto:        { paragrafo1: string; paragrafo2: string; paragrafo3: string };
+}
 export type ReasoningResult  = z.infer<typeof ReasoningSchema>;
 
 export interface FullAnalysis {
@@ -199,7 +205,7 @@ export async function analyzeWithClaude(pageTexts: string[]): Promise<FullAnalys
     return callClaude('Sei un assistente JSON. Restituisci SOLO JSON valido.', repairPrompt);
   };
 
-  const extraction = await parseWithRetry(raw1, ExtractionSchema, repairExtraction);
+  const extraction = await parseWithRetry(raw1, ExtractionSchema, repairExtraction) as unknown as ExtractionResult;
   console.log(`[claude] Step 1 done: valore_perito=${extraction.valore_perito.status}`);
 
   // ── Step 2: Reasoning ─────────────────────────────────────────────────────
