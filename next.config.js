@@ -19,21 +19,18 @@ if (fs.existsSync(workerSrc)) {
   try { fs.copyFileSync(workerSrc, workerDst); } catch (_) {}
 }
 
+const EXTERNAL_PACKAGES = [
+  'pdf-parse', 'pdfjs-dist', '@napi-rs/canvas', 'openai', '@anthropic-ai/sdk',
+  'bullmq', 'ioredis', '@aws-sdk/client-s3', '@aws-sdk/client-textract', '@aws-sdk/s3-request-presigner',
+  'bcryptjs',
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Next.js 14.2+ stable API: prevents bundling these packages for server-side code
-  // and ensures Vercel's nft (Node File Trace) includes them in the serverless function bundle.
-  serverExternalPackages: [
-    'pdf-parse', 'pdfjs-dist', '@napi-rs/canvas', 'openai', '@anthropic-ai/sdk',
-    'bullmq', 'ioredis', '@aws-sdk/client-s3', '@aws-sdk/client-textract', '@aws-sdk/s3-request-presigner',
-    'bcryptjs',
-  ],
+  // Next.js 14.x: use experimental.serverComponentsExternalPackages
+  // (serverExternalPackages is Next.js 15+ only — don't use it here)
   experimental: {
-    serverComponentsExternalPackages: [
-      'pdf-parse', 'pdfjs-dist', '@napi-rs/canvas', 'openai', '@anthropic-ai/sdk',
-      'bullmq', 'ioredis', '@aws-sdk/client-s3', '@aws-sdk/client-textract', '@aws-sdk/s3-request-presigner',
-      'bcryptjs',
-    ],
+    serverComponentsExternalPackages: EXTERNAL_PACKAGES,
   },
   webpack: (config, { isServer }) => {
     if (isServer) {

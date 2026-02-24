@@ -841,21 +841,21 @@ export default function AnalizzaPage() {
             const raw = jobData.result as Record<string, unknown> | null;
             if (!raw) { setError('Risultato non trovato.'); return; }
 
-            const toField = (f: Record<string, unknown>, valKey: 'value' | 'summary') => ({
-              status:     (f?.status as string) ?? 'not_found',
-              confidence: (f?.confidence as number) ?? 0.5,
-              citations:  [],
-              candidates: [],
-              [valKey]:   (f?.[valKey] as string) ?? null,
+            const getF = (f: unknown) => f as Record<string, unknown> ?? {};
+            const base = (f: unknown) => ({
+              status:     ((getF(f).status as string) ?? 'not_found') as 'found' | 'not_found',
+              confidence: (getF(f).confidence as number) ?? 0.5,
+              citations:  [] as { page: number; snippet: string }[],
+              candidates: [] as { value: string; confidence: number; citations: { page: number; snippet: string }[] }[],
             });
-            const meta = (raw.meta as Record<string, unknown>) ?? {};
+            const meta = getF(raw.meta);
 
             const mapped: AnalysisResult = {
-              valore_perito:    toField(raw.valore_perito as Record<string, unknown>, 'value') as AnalysisResult['valore_perito'],
-              atti_antecedenti: toField(raw.atti_antecedenti as Record<string, unknown>, 'summary') as AnalysisResult['atti_antecedenti'],
-              costi_oneri:      toField(raw.costi_oneri as Record<string, unknown>, 'summary') as AnalysisResult['costi_oneri'],
-              difformita:       toField(raw.difformita as Record<string, unknown>, 'summary') as AnalysisResult['difformita'],
-              riassunto:        raw.riassunto as AnalysisResult['riassunto'],
+              valore_perito:    { ...base(raw.valore_perito), value: (getF(raw.valore_perito).value as string) ?? null },
+              atti_antecedenti: { ...base(raw.atti_antecedenti), summary: (getF(raw.atti_antecedenti).summary as string) ?? null },
+              costi_oneri:      { ...base(raw.costi_oneri), summary: (getF(raw.costi_oneri).summary as string) ?? null },
+              difformita:       { ...base(raw.difformita), summary: (getF(raw.difformita).summary as string) ?? null },
+              riassunto:        (raw.riassunto as AnalysisResult['riassunto']) ?? { paragrafo1: '', paragrafo2: '', paragrafo3: '' },
               debug: {
                 totalPages: (meta.total_pages as number) ?? 0,
                 totalChars: (meta.textLen as number) ?? 0,

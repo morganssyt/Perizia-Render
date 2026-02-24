@@ -42,3 +42,5 @@ test-render.mjs
 test-server.js
 test-*.png
 test-*.pdf
+
+.vercel
