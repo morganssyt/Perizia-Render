@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+dist/
+build/
+
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# Database
+prisma/dev.db
+prisma/dev.db-journal
+
+# Uploads directory (user files)
+uploads/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# Vercel
+.vercel
+
+# Local test/dev scripts and sample files
+reprocess.mjs
+test-render.mjs
+test-server.js
+test-*.png
+test-*.pdf

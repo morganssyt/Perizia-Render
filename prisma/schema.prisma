@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Auth ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  plan         String   @default("free") // free | pro | studio
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  documents Document[]
+  jobs      Job[]
+}
+
+// ─── Documents ──────────────────────────────────────────────────────────────
+
+model Document {
+  id           String   @id @default(uuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  filename     String
+  s3Key        String   @default("") // S3 object key
+  uploadedAt   DateTime @default(now())
+  pages        Int      @default(0)
+  status       String   @default("pending") // pending | processing | completed | error
+  errorMessage String?
+
+  extraction ExtractionResult?
+  reviews    ReviewEntry[]
+  jobs       Job[]
+}
+
+// ─── Job Queue ──────────────────────────────────────────────────────────────
+
+model Job {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  bullmqId  String? // BullMQ job id (for reference)
+  status    String  @default("pending") // pending | processing | succeeded | failed
+  progress  Int     @default(0) // 0-100
+
+  // Textract metrics (logged, not PII)
+  pagesCount Int?
+  textLen    Int?
+  watermarkFilteredCount Int?
+
+  errorMessage String?
+  result       String? // JSON: AnalysisResult (stored on completion)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Extraction Results ─────────────────────────────────────────────────────
+
+model ExtractionResult {
+  id         String   @id @default(uuid())
+  documentId String   @unique
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  // Stored as JSON strings
+  antecedentActs String @default("[]")
+  legalCosts     String @default("[]")
+  irregularities String @default("[]")
+  expertValue    String @default("{}")
+
+  // 3 summary paragraphs
+  summaryAsset   String @default("")
+  summaryRisks   String @default("")
+  summaryActions String @default("")
+
+  debugInfo    String @default("{}")
+  pipelineLogs String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Review Entries ─────────────────────────────────────────────────────────
+
+model ReviewEntry {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  fieldKey  String
+  itemIndex Int     @default(0)
+  verified  Boolean @default(false)
+  userEdit  String?
+  notes     String?
+  reviewer  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([documentId, fieldKey, itemIndex])
+}

@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-white text-slate-900 antialiased;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Focus */
+*:focus-visible { @apply outline-2 outline-offset-2 outline-blue-700; }
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeIn 0.25s ease-out; }
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+.animate-pulse-slow { animation: pulse-slow 2s ease-in-out infinite; }
+
+/* Progress bar */
+.progress-bar      { @apply h-1.5 rounded-full bg-slate-200 overflow-hidden; }
+.progress-bar-fill { @apply h-full rounded-full bg-blue-700 transition-all duration-500; }
+
+/* ── Print styles ── */
+@media print {
+  body * { visibility: hidden; }
+  .print-only, .print-only * { visibility: visible; display: block !important; }
+  .print-only { position: absolute; left: 0; top: 0; width: 100%; }
+  .no-print { display: none !important; }
+  @page { margin: 20mm; size: A4; }
+  .print-sheet { background: white !important; color: black !important; }
+}

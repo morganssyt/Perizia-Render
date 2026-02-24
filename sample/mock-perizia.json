@@ -1,0 +1,98 @@
+{
+  "documento": {
+    "id": "mock-001",
+    "filename": "perizia_esempio_tribunale_milano.pdf",
+    "pagine": 12,
+    "dataCaricamento": "2024-06-15T10:30:00Z"
+  },
+  "estrazione": {
+    "attiAntecedenti": [
+      {
+        "tipoAtto": "compravendita",
+        "data": "2010-03-15",
+        "notaRegistro": "Repertorio n. 12345, Raccolta n. 6789, Notaio Rossi",
+        "soggetti": ["Mario Rossi", "Banca Esempio SpA"],
+        "sintesi": "Immobile proveniente da atto di compravendita del 15/03/2010. Trascritto presso la Conservatoria di Milano al n. 45678/2010.",
+        "confidence": 0.85,
+        "reason": "Keyword match: compravendita, trascrizione, provenienza (in titolo sezione)",
+        "citations": [
+          {
+            "page": 3,
+            "snippet": "L'immobile proviene da atto di compravendita stipulato in data 15/03/2010 presso il notaio Rossi, repertorio n. 12345, raccolta n. 6789."
+          }
+        ]
+      },
+      {
+        "tipoAtto": "pignoramento, ipoteca",
+        "data": "2023-05-20",
+        "sintesi": "Pignoramento trascritto il 20/05/2023. Ipoteca iscritta a favore di Banca Esempio per € 200.000,00.",
+        "confidence": 0.80,
+        "reason": "Keyword match: pignoramento, ipoteca",
+        "citations": [
+          {
+            "page": 3,
+            "snippet": "Si segnala la presenza di un pignoramento trascritto in data 20/05/2023. Ipoteca iscritta a favore della Banca Esempio per € 200.000,00."
+          }
+        ]
+      }
+    ],
+    "costiOneri": [
+      {
+        "descrizione": "Spese condominiali arretrate ultimi due anni",
+        "importo": 3450,
+        "importoRaw": "€ 3.450,00",
+        "periodo": "ultimi due anni",
+        "chiPaga": "aggiudicatario",
+        "ultimiDueAnni": true,
+        "confidence": 0.90,
+        "reason": "Keyword match: spese condominiali, arretrati, ultimi due anni. Importo trovato: € 3.450,00"
+      },
+      {
+        "descrizione": "Spese per regolarizzazione urbanistica (stimate)",
+        "importo": 5000,
+        "importoRaw": "€ 5.000,00",
+        "chiPaga": "aggiudicatario",
+        "ultimiDueAnni": false,
+        "confidence": 0.75,
+        "reason": "Keyword match: regolarizzazione, spese. Importo trovato: € 5.000,00"
+      }
+    ],
+    "difformita": [
+      {
+        "categoria": "catastale",
+        "descrizione": "La planimetria catastale non corrisponde allo stato attuale. Chiusura balcone non autorizzata.",
+        "gravita": "media",
+        "impatto": "Regolarizzabile (necessita opere)",
+        "costiEventuali": 5000,
+        "costiRaw": "€ 5.000,00",
+        "stimaPresente": true,
+        "confidence": 0.85,
+        "reason": "Keyword match: difformità catastale, planimetria, regolarizzazione"
+      },
+      {
+        "categoria": "edilizia",
+        "descrizione": "Realizzazione di un soppalco senza permesso di costruire.",
+        "gravita": "alta",
+        "impatto": "Necessita opere/intervento",
+        "stimaPresente": false,
+        "confidence": 0.80,
+        "reason": "Keyword match: abuso edilizio, permesso di costruire"
+      }
+    ],
+    "valorePerito": {
+      "valore": 165000,
+      "valoreRaw": "€ 165.000,00",
+      "valuta": "EUR",
+      "range": { "min": 165000, "max": 185000 },
+      "tipo": "valore di stima",
+      "dataContesto": "2024-03-15",
+      "confidence": 0.92,
+      "reason": "Tipo: valore di stima. Importo: € 165.000,00. Keywords: determinazione del valore, valore di stima"
+    }
+  },
+  "riassuntoOperativo": {
+    "quadroBene": "L'immobile oggetto di perizia è un appartamento situato nel Comune di Milano. Il valore di stima determinato dal perito è di € 165.000,00, mentre il valore di mercato è di € 185.000,00. La differenza è dovuta ai costi di regolarizzazione delle difformità riscontrate.",
+    "rischiCosti": "Sono state rilevate difformità catastali (planimetria non corrispondente per chiusura balcone) e un abuso edilizio (soppalco senza permesso). I costi di regolarizzazione sono stimati in € 5.000,00. Spese condominiali arretrate degli ultimi 2 anni pari a € 3.450,00 a carico dell'aggiudicatario.",
+    "azioniConsigliate": "Verificare immediatamente: (1) lo stato delle iscrizioni pregiudizievoli e il pignoramento del 20/05/2023; (2) l'ipoteca di € 200.000,00 a favore di Banca Esempio; (3) la possibilità effettiva di regolarizzazione del soppalco abusivo mediante SCIA in sanatoria. Checklist: richiedere visura catastale aggiornata, verificare debiti condominiali con l'amministratore, ottenere preventivo per regolarizzazione."
+  }
+}
