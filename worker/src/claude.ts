@@ -139,6 +139,21 @@ async function parseWithRetry<T>(
 const EXTRACTION_SYSTEM = `Sei un analista legale specializzato in perizie immobiliari italiane per aste giudiziarie.
 Estrai i dati strutturati dal testo della perizia fornito.
 
+IMPORTANTE — IGNORA COMPLETAMENTE QUESTI WATERMARK/INTESTAZIONI (presenti su ogni pagina, non sono contenuto della perizia):
+- "Portale delle Vendite Pubbliche" / "Portale Vendite Pubbliche"
+- "Pubblicazione Ufficiale" / "Pubblicazione ufficiale"
+- "Ministero della Giustizia"
+- "ASTE GIUDIZIARIE" / "Aste Giudiziarie"
+- "pvp.giustizia.it"
+- "Tribunale Ordinario di ..."
+- "Decreto Ministeriale"
+- Numeri di pagina isolati (es. "1", "2/15")
+- Qualsiasi testo ripetuto identico su più pagine che non sia contenuto della perizia
+
+Concentrati ESCLUSIVAMENTE sul contenuto sostanziale della perizia: descrizione immobile, valori, catasto, difformità, oneri, stato di possesso, ecc.
+
+REGOLA CRITICA: Se il testo contiene ANCHE SOLO UN dato reale della perizia (indirizzo, valore, particella catastale, superficie, stato manutentivo, ecc.), estrai tutto ciò che puoi trovare. NON dichiarare "solo watermark" o "documento non leggibile" se esiste qualsiasi dato reale. Se i dati sono parziali, usa confidence bassa (0.4) e status "found".
+
 Restituisci SOLO JSON valido (nessun markdown, nessuna spiegazione):
 
 {
@@ -150,11 +165,11 @@ Restituisci SOLO JSON valido (nessun markdown, nessuna spiegazione):
 }
 
 Regole:
-- confidence: 1.0=chiaro, 0.7=parziale, 0.4=incerto
+- confidence: 1.0=chiaro, 0.7=parziale, 0.4=incerto/dedotto
 - se not_found → value/summary=null
 - valore_perito.value formato: "€ 250.000,00"
-- riassunto: professionale, conciso, 3 paragrafi in italiano
-- ignora watermark: "Pubblicazione ufficiale", "ASTE GIUDIZIARIE", numeri di pagina`;
+- riassunto: 3 paragrafi professionali in italiano — descrivi l'immobile, il valore e i rischi reali trovati nel documento. Se alcune sezioni mancano, indicalo nel riassunto spiegando cosa manca (non il motivo "watermark")
+- Non menzionare mai "watermark" o "intestazioni" nel riassunto — quelli sono artefatti tecnici già filtrati`;
 
 // ── Step 2: Reasoning ─────────────────────────────────────────────────────────
 
@@ -195,6 +210,10 @@ export async function analyzeWithClaude(pageTexts: string[]): Promise<FullAnalys
   }
 
   const userMsg1 = `Analizza questa perizia immobiliare (testo estratto per pagina):\n\n${anchoredText}`;
+
+  // Diagnostic: log a sample of exactly what Claude will receive
+  console.log(`[claude] TEXT SENT TO CLAUDE (first 2000 chars):\n${anchoredText.slice(0, 2000)}`);
+  console.log(`[claude] TEXT SENT TO CLAUDE (last 1000 chars):\n${anchoredText.slice(-1000)}`);
 
   // ── Step 1: Extraction ────────────────────────────────────────────────────
   console.log(`[claude] Step 1: extraction promptLen=${userMsg1.length}`);
