@@ -196,49 +196,45 @@ const Schema = z.object({
 // System prompt (unchanged)
 // ---------------------------------------------------------------------------
 
+// Each resoconto section uses: {trovato, valore, cosa_dice, cosa_significa, estratto, pagina_rif, confidenza}
+// Omitted from prompt for brevity — kept in RESOCONTO_SECTION_SCHEMA for reference
+const _RESOCONTO_SECTION_SCHEMA = '{"trovato":bool,"valore":"...or null","cosa_dice":"...or null","cosa_significa":"...or null","estratto":"verbatim ≤25 words or null","pagina_rif":"Pagina X or null","confidenza":"Alta|Media|Bassa"}';
+
 const SYSTEM_PROMPT = `You are a legal real estate auction analyst specializing in Italian perizia immobiliare documents.
-Extract ALL structured data from the provided text.
+IGNORE WATERMARKS: skip all lines with "Portale delle Vendite Pubbliche", "Pubblicazione Ufficiale", "Ministero della Giustizia", "ASTE GIUDIZIARIE", "pvp.giustizia.it".
 
-IMPORTANT — IGNORE WATERMARKS: Ignore all repeated portal headers from "Portale delle Vendite Pubbliche",
-"Pubblicazione Ufficiale", "Ministero della Giustizia", "ASTE GIUDIZIARIE", "pvp.giustizia.it".
-Focus ONLY on the substantive perizia content.
-
-Return STRICT JSON with EXACTLY these keys (no markdown, no extra keys):
+Output ONLY a single JSON object (no markdown, no extra text):
 
 {
-  "valore_perito":    { "status": "found"|"not_found", "value": "€ 250.000,00"|null, "confidence": 0.0-1.0 },
-  "atti_antecedenti": { "status": "found"|"not_found", "summary": "<text>"|null, "confidence": 0.0-1.0 },
-  "costi_oneri":      { "status": "found"|"not_found", "summary": "<text>"|null, "confidence": 0.0-1.0 },
-  "difformita":       { "status": "found"|"not_found", "summary": "<text>"|null, "confidence": 0.0-1.0 },
-  "riassunto": { "paragrafo1": "<property & value summary>", "paragrafo2": "<risks & costs>", "paragrafo3": "<acts & actions>" },
+  "valore_perito":    {"status":"found|not_found","value":"€ 250.000,00 or null","confidence":0.0-1.0},
+  "atti_antecedenti": {"status":"found|not_found","summary":"text or null","confidence":0.0-1.0},
+  "costi_oneri":      {"status":"found|not_found","summary":"text or null","confidence":0.0-1.0},
+  "difformita":       {"status":"found|not_found","summary":"text or null","confidence":0.0-1.0},
+  "riassunto":        {"paragrafo1":"property & value","paragrafo2":"risks & costs","paragrafo3":"acts & actions"},
   "resoconto": {
-    "identificazione":   { "trovato": true, "valore": "<tipo, indirizzo, comune/prov, destinazione>", "cosa_dice": "<riassunto fedele max 3 frasi>", "cosa_significa": "<spiegazione semplice max 2 frasi>", "estratto": "<citazione testuale max 25 parole>", "pagina_rif": "Pagina X", "confidenza": "Alta|Media|Bassa" },
-    "dati_catastali":    { "trovato": true, "valore": "<foglio, particella, sub, cat, rendita, consistenza>", "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Alta" },
-    "superfici":         { "trovato": true, "valore": "<sup. commerciale/catastale/utile>", "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Media" },
-    "titolarita":        { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
-    "vincoli_ipoteche":  { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
-    "stato_occupativo":  { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
-    "conformita":        { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
-    "stato_manutentivo": { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
-    "spese_condominio":  { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
-    "valutazione":       { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
-    "rischi": [
-      { "descrizione": "<risk description>", "severita": "Alta|Media|Bassa", "cosa_significa": "<plain language for buyer>" }
-    ],
-    "checklist": ["<document/check 1>", "<document/check 2>"]
+    "identificazione":   {"trovato":true|false,"valore":"tipo, indirizzo, comune","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa"},
+    "dati_catastali":    {"trovato":true|false,"valore":"foglio/particella/sub/cat/rendita","cosa_dice":null,"cosa_significa":null,"estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa"},
+    "superfici":         {"trovato":true|false,"valore":"comm/catastale/utile mq","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
+    "titolarita":        {"trovato":true|false,"valore":"intestatario e quota","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
+    "vincoli_ipoteche":  {"trovato":true|false,"valore":"ipoteche/pignoramenti/servitù","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
+    "stato_occupativo":  {"trovato":true|false,"valore":"libero/occupato/contratto","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
+    "conformita":        {"trovato":true|false,"valore":"conforme/difformità/abusi","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
+    "stato_manutentivo": {"trovato":true|false,"valore":"condizioni/impianti/energia","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
+    "spese_condominio":  {"trovato":true|false,"valore":"spese/arretrati importi","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
+    "valutazione":       {"trovato":true|false,"valore":"valore stima/base asta","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa"},
+    "rischi":    [{"descrizione":"rischio breve","severita":"Alta|Media|Bassa","cosa_significa":"1 frase semplice per compratore"}],
+    "checklist": ["verifica 1","verifica 2"]
   }
 }
 
 Rules:
-- confidence: 1.0=clear mention, 0.7=partial/inferred, 0.4=uncertain
-- if not_found → value/summary must be null
-- valore_perito.value format: "€ 250.000,00"
-- riassunto: 3 professional Italian paragraphs summarising property, value, risks
-- resoconto: for each sub-field, set trovato=true only if the information exists in the text; otherwise trovato=false and all other fields null
-- resoconto.estratto: verbatim text excerpt max 25 words; null if not found
-- resoconto.rischi: max 5 risks, ordered by severity (Alta first); cosa_significa must be simple plain language
-- resoconto.checklist: 8-12 concrete verification steps a buyer should take before bidding
-- Output ONLY the JSON object, no markdown fences, no explanation`;
+- confidence: 1.0=explicit, 0.7=inferred, 0.4=uncertain
+- if not found → set trovato=false, all text fields null
+- riassunto: 3 professional Italian paragraphs
+- rischi: max 5, sorted Alta→Bassa; cosa_significa in plain Italian for a non-expert buyer
+- checklist: 8-12 concrete pre-bid verification steps
+- cosa_dice/cosa_significa: null for sections where they add no value (dati catastali, superfici)
+- estratto: verbatim words from the source text, max 25 words, null if not applicable`;
 
 // ---------------------------------------------------------------------------
 // Retry on 429
@@ -411,12 +407,34 @@ async function handleWithPdfVision(
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/, '');
 
+  // Log first 300 chars of what Claude returned for diagnosability
+  console.log(`[analyze][${requestId}] PDF vision jsonText[0..300]: ${jsonText.slice(0, 300)}`);
+  console.log(`[analyze][${requestId}] PDF vision jsonText[-200..]: ${jsonText.slice(-200)}`);
+
   let parsed: unknown;
   try { parsed = JSON.parse(jsonText); }
-  catch {
-    return err(requestId, 'Risposta Claude PDF vision non è JSON valido.', 502, {
-      raw: jsonText.slice(0, 500),
-    });
+  catch (parseErr) {
+    // Attempt to recover truncated JSON: strip resoconto and try just the first 5 fields
+    const truncIdx = jsonText.lastIndexOf('"riassunto"');
+    if (truncIdx > 0) {
+      // Find the end of riassunto object by scanning for matching braces
+      let depth = 0; let endIdx = -1;
+      for (let i = truncIdx; i < jsonText.length; i++) {
+        if (jsonText[i] === '{') depth++;
+        else if (jsonText[i] === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+      }
+      if (endIdx > 0) {
+        const fixedJson = jsonText.slice(0, endIdx + 1) + '}';
+        try { parsed = JSON.parse(fixedJson); console.log(`[analyze][${requestId}] JSON truncation repaired`); }
+        catch { /* fall through to error */ }
+      }
+    }
+    if (!parsed) {
+      console.error(`[analyze][${requestId}] JSON parse failed: ${String(parseErr)} | raw[-300]: ${jsonText.slice(-300)}`);
+      return err(requestId, 'Risposta Claude PDF vision non è JSON valido.', 502, {
+        raw: jsonText.slice(0, 500), tail: jsonText.slice(-200),
+      });
+    }
   }
 
   const v = Schema.safeParse(parsed);
@@ -484,7 +502,7 @@ async function handleWithPdfVision(
 const MAX_BYTES      = (parseInt(process.env.MAX_PDF_MB        ?? '15',    10) || 15)    * 1024 * 1024;
 const LLM_TIMEOUT_MS =  parseInt(process.env.ANALYZE_TIMEOUT_MS ?? '50000', 10) || 50_000;
 const MAX_TEXT_CHARS = 80_000;
-const MAX_TOKENS     = 4096;
+const MAX_TOKENS     = 8192;
 const MODEL          = 'claude-haiku-4-5-20251001';
 
 function makeId() { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`; }
@@ -674,7 +692,25 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
   // ── Parse + Validate ──────────────────────────────────────────────────────
   let parsed: unknown;
   try { parsed = JSON.parse(jsonText); }
-  catch { return err(requestId, 'Risposta Claude non era JSON valido.', 502, { raw: jsonText.slice(0, 500) }); }
+  catch (parseErr) {
+    // Attempt truncation repair: if resoconto was cut off, try without it
+    const truncIdx = jsonText.lastIndexOf('"riassunto"');
+    if (truncIdx > 0) {
+      let depth = 0; let endIdx = -1;
+      for (let i = truncIdx; i < jsonText.length; i++) {
+        if (jsonText[i] === '{') depth++;
+        else if (jsonText[i] === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+      }
+      if (endIdx > 0) {
+        try { parsed = JSON.parse(jsonText.slice(0, endIdx + 1) + '}'); console.log(`[analyze][${requestId}] JSON truncation repaired`); }
+        catch { /* fall through */ }
+      }
+    }
+    if (!parsed) {
+      console.error(`[analyze][${requestId}] JSON parse fail: ${String(parseErr)} | tail: ${jsonText.slice(-300)}`);
+      return err(requestId, 'Risposta Claude non era JSON valido.', 502, { raw: jsonText.slice(0, 500) });
+    }
+  }
 
   const v = Schema.safeParse(parsed);
   if (!v.success) return err(requestId, 'Schema JSON non valido.', 502, { issues: v.error.issues, raw: parsed });
