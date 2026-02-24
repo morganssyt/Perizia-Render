@@ -19,6 +19,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { extractPdfPages } from '@/lib/extract-pdf-pages';
 import { rankPages, selectPages } from '@/lib/rank-pages';
+import { removeWatermarkLines } from '@/lib/watermark';
 
 // ---------------------------------------------------------------------------
 // Staging flag — expose pdfDebug in preview/staging, never in production
@@ -292,9 +293,17 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
     );
   }
 
+  // ── Watermark filter ─────────────────────────────────────────────────────
+  const selectedTexts = selectedPageNums.map((pg) => pagesMap[pg]?.text ?? '');
+  const { cleanedPages, watermarkFilteredCount } = removeWatermarkLines(selectedTexts);
+  const cleanedMap = Object.fromEntries(
+    selectedPageNums.map((pg, i) => [pg, cleanedPages[i] ?? '']),
+  );
+  console.log(`[analyze][${requestId}] watermark: filteredLines=${watermarkFilteredCount}`);
+
   // ── Build anchored text (--- PAGE N --- format) ──────────────────────────
   let anchoredText = selectedPageNums
-    .map((pg) => `--- PAGE ${pg} ---\n${pagesMap[pg]?.text ?? ''}`)
+    .map((pg) => `--- PAGE ${pg} ---\n${cleanedMap[pg] ?? ''}`)
     .join('\n\n');
 
   if (anchoredText.length > MAX_TEXT_CHARS) {
