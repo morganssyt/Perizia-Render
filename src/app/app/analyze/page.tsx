@@ -16,10 +16,12 @@ import type {
 import { usePersistence } from '@/hooks/usePersistence';
 import FieldSection from '@/components/results/FieldSection';
 import SummarySection from '@/components/results/SummarySection';
+import ResocontoSection from '@/components/results/ResocontoSection';
 import ExportMenu from '@/components/export/ExportMenu';
 import VerifyWorkflow from '@/components/verify/VerifyWorkflow';
 import RiskPanel from '@/components/results/RiskPanel';
 import { saveToHistory } from '@/lib/history';
+import { openAndPrintResoconto } from '@/lib/generate-resoconto-pdf';
 
 const PdfViewer = dynamic(() => import('@/components/PdfViewer'), {
   ssr: false,
@@ -707,6 +709,7 @@ export default function AnalizzaPage() {
   const stepIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
   const [pdfDebug, setPdfDebug] = useState<PdfDebugInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<ApiError | null>(null);
@@ -733,6 +736,7 @@ export default function AnalizzaPage() {
       setFile(selected);
       setFileUrl(URL.createObjectURL(selected));
       setResult(null);
+      setRequestId(null);
       setError(null);
       setApiError(null);
       setPdfDebug(null);
@@ -767,6 +771,7 @@ export default function AnalizzaPage() {
       setLoading(true);
       setError(null);
       setResult(null);
+      setRequestId(null);
       setApiError(null);
       setPdfDebug(null);
       setShowDebug(false);
@@ -808,8 +813,9 @@ export default function AnalizzaPage() {
             setApiError({ ...apiErr, httpStatus: res.status });
             return;
           }
-          const r = payload as AnalysisResult & { pdfDebug?: PdfDebugInfo };
+          const r = payload as AnalysisResult & { pdfDebug?: PdfDebugInfo; requestId?: string };
           setResult(r);
+          if (r.requestId) setRequestId(r.requestId);
           if (r.pdfDebug) setPdfDebug(r.pdfDebug);
           try { saveToHistory(file.name, r); } catch { /* ok */ }
           return;
@@ -896,6 +902,7 @@ export default function AnalizzaPage() {
     setFile(null);
     setFileUrl(null);
     setResult(null);
+    setRequestId(null);
     setError(null);
     setApiError(null);
     setPdfDebug(null);
@@ -1108,27 +1115,79 @@ export default function AnalizzaPage() {
             {result && (
               <div className="space-y-5 animate-fade-in">
 
-                {/* Scan-detected banner */}
-                {result.debug.isScanDetected && (
-                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
-                    <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                    </svg>
-                    <div>
-                      <p className="text-amber-800 font-semibold text-sm">
-                        {result.debug.extractionEngine === 'failed'
-                          ? 'Impossibile leggere il PDF'
-                          : 'PDF scannerizzato — testo non selezionabile'}
-                      </p>
-                      <p className="text-amber-700 text-xs mt-0.5">
-                        {result.debug.extractionEngine === 'failed'
-                          ? 'Il parsing del PDF è fallito. Riprova o usa un PDF con testo selezionabile (non solo scansione).'
-                          : 'Il PDF non contiene testo estraibile. I risultati sono incompleti — serve un PDF testuale o OCR.'}
-                      </p>
+                {/* ── PDF type badge + quality gate (deterministic, no false positives) ── */}
+                {(() => {
+                  const eng = result.debug.extractionEngine ?? '';
+                  const visionUsed = result.debug.vision_used ?? result.debug.isScanDetected;
+                  const hasTextLayer = result.debug.has_text_layer ?? !visionUsed;
+                  const qScore = result.debug.data_quality_score ?? (result.debug.isScanDetected ? 30 : 70);
+                  const qReason = result.debug.data_quality_reason ?? '';
+
+                  if (eng === 'failed') {
+                    return (
+                      <div className="bg-red-50 border border-red-300 rounded-xl p-4 flex items-start gap-3">
+                        <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        </svg>
+                        <div>
+                          <p className="text-red-800 font-semibold text-sm">Impossibile leggere il PDF</p>
+                          <p className="text-red-700 text-xs mt-0.5">Il parsing del PDF è fallito. Riprova con un PDF non protetto.</p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (hasTextLayer && !visionUsed) {
+                    return (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                          PDF testuale rilevato
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">Q:{qScore}/100</span>
+                        {requestId && <span className="text-xs text-slate-300 font-mono">ID:{requestId}</span>}
+                      </div>
+                    );
+                  }
+
+                  if (visionUsed && qScore >= 60) {
+                    return (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                          </svg>
+                          PDF scannerizzato — OCR applicato con successo
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">Q:{qScore}/100</span>
+                        {requestId && <span className="text-xs text-slate-300 font-mono">ID:{requestId}</span>}
+                      </div>
+                    );
+                  }
+
+                  // Low quality warning (the only case we show amber/red)
+                  return (
+                    <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
+                      <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                      </svg>
+                      <div className="flex-1">
+                        <p className="text-amber-800 font-semibold text-sm">
+                          PDF scannerizzato — qualità dati bassa
+                        </p>
+                        <p className="text-amber-700 text-xs mt-0.5">
+                          Il PDF non contiene testo selezionabile e la qualità OCR è bassa
+                          (score: <strong>{qScore}/100</strong>). I risultati potrebbero essere incompleti.
+                          {qReason && <span> Motivo: {qReason}.</span>}
+                        </p>
+                        {requestId && <p className="text-amber-500 text-xs font-mono mt-1">ID:{requestId}</p>}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Staging: pdfDebug panel */}
                 {pdfDebug && (
@@ -1213,6 +1272,33 @@ export default function AnalizzaPage() {
 
                 {/* Operative summary */}
                 <SummarySection riassunto={result.riassunto} />
+
+                {/* Resoconto completo (12 sections) */}
+                {result.resoconto_completo && (
+                  <div className="border-t border-slate-100 pt-5 space-y-4">
+                    <ResocontoSection resoconto={result.resoconto_completo} />
+                  </div>
+                )}
+
+                {/* PDF Resoconto button */}
+                <div className="border border-blue-200 bg-blue-50 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3 justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-blue-900">Resoconto completo in PDF</p>
+                    <p className="text-xs text-blue-600 mt-0.5">
+                      Genera un PDF professionale con copertina, indice, tutte le sezioni e appendice fonti.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => openAndPrintResoconto(result, file?.name ?? 'perizia.pdf')}
+                    className="flex-shrink-0 flex items-center gap-2 bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-blue-800 active:scale-[0.98] transition-all shadow-sm"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Vedi il resoconto (PDF)
+                  </button>
+                </div>
 
                 {/* Verify workflow */}
                 <VerifyWorkflow verified={verified} onToggle={setVerified} />

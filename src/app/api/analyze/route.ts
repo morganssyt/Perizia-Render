@@ -73,6 +73,40 @@ export interface DebugInfo {
   extractionEngine?: string;
   /** error from extractPdfPages when engine = 'failed' */
   extractionError?: string;
+  /** Data quality gate (present in all new responses) */
+  has_text_layer?: boolean;
+  vision_used?: boolean;
+  extracted_chars_text_layer?: number;
+  final_chars_sent_to_llm?: number;
+  data_quality_score?: number;
+  data_quality_reason?: string;
+}
+
+// ── Resoconto completo types ────────────────────────────────────────────────
+
+export interface ResocontoField {
+  trovato: boolean;
+  valore: string | null;
+  cosa_dice: string | null;
+  cosa_significa: string | null;
+  estratto: string | null;
+  pagina_rif: string | null;
+  confidenza: 'Alta' | 'Media' | 'Bassa';
+}
+
+export interface ResocontoCompleto {
+  identificazione: ResocontoField;
+  dati_catastali: ResocontoField;
+  superfici: ResocontoField;
+  titolarita: ResocontoField;
+  vincoli_ipoteche: ResocontoField;
+  stato_occupativo: ResocontoField;
+  conformita: ResocontoField;
+  stato_manutentivo: ResocontoField;
+  spese_condominio: ResocontoField;
+  valutazione: ResocontoField;
+  rischi: Array<{ descrizione: string; severita: 'Alta' | 'Media' | 'Bassa'; cosa_significa: string }>;
+  checklist: string[];
 }
 
 export interface Evidence {
@@ -96,6 +130,7 @@ export type AnalysisResult = {
   costi_oneri:      FieldResult & { summary: string | null };
   difformita:       FieldResult & { summary: string | null };
   riassunto: { paragrafo1: string; paragrafo2: string; paragrafo3: string };
+  resoconto_completo?: ResocontoCompleto;
   debug: DebugInfo;
   meta:  Meta;
   evidence?: Evidence;
@@ -121,44 +156,89 @@ const FieldBase = z.object({
   confidence: z.number().min(0).max(1).default(0.5),
 });
 
+const ResocontoFieldZ = z.object({
+  trovato:        z.boolean().default(false),
+  valore:         z.string().nullable().default(null),
+  cosa_dice:      z.string().nullable().default(null),
+  cosa_significa: z.string().nullable().default(null),
+  estratto:       z.string().nullable().default(null),
+  pagina_rif:     z.string().nullable().default(null),
+  confidenza:     z.enum(['Alta', 'Media', 'Bassa']).default('Media'),
+});
+
 const Schema = z.object({
   valore_perito:    FieldBase.extend({ value:   z.string().nullable() }),
   atti_antecedenti: FieldBase.extend({ summary: z.string().nullable() }),
   costi_oneri:      FieldBase.extend({ summary: z.string().nullable() }),
   difformita:       FieldBase.extend({ summary: z.string().nullable() }),
   riassunto: z.object({ paragrafo1: z.string(), paragrafo2: z.string(), paragrafo3: z.string() }),
+  resoconto: z.object({
+    identificazione:  ResocontoFieldZ,
+    dati_catastali:   ResocontoFieldZ,
+    superfici:        ResocontoFieldZ,
+    titolarita:       ResocontoFieldZ,
+    vincoli_ipoteche: ResocontoFieldZ,
+    stato_occupativo: ResocontoFieldZ,
+    conformita:       ResocontoFieldZ,
+    stato_manutentivo: ResocontoFieldZ,
+    spese_condominio: ResocontoFieldZ,
+    valutazione:      ResocontoFieldZ,
+    rischi: z.array(z.object({
+      descrizione:    z.string(),
+      severita:       z.enum(['Alta', 'Media', 'Bassa']),
+      cosa_significa: z.string(),
+    })).default([]),
+    checklist: z.array(z.string()).default([]),
+  }).optional(),
 });
 
 // ---------------------------------------------------------------------------
 // System prompt (unchanged)
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `You are a legal real estate auction analyst.
-Extract structured data from the provided Italian perizia immobiliare text.
+const SYSTEM_PROMPT = `You are a legal real estate auction analyst specializing in Italian perizia immobiliare documents.
+Extract ALL structured data from the provided text.
 
-IMPORTANT — IGNORE WATERMARKS: The text may contain repeated portal headers/footers from the
-Italian judicial auction portal (Portale Vendite Pubbliche / PVP). Completely ignore any line
-containing: "Portale delle Vendite Pubbliche", "Pubblicazione Ufficiale", "Ministero della
-Giustizia", "ASTE GIUDIZIARIE", "pvp.giustizia.it", "Decreto Ministeriale", page numbers alone,
-or any repeated disclaimer text. Focus ONLY on the substantive perizia content.
+IMPORTANT — IGNORE WATERMARKS: Ignore all repeated portal headers from "Portale delle Vendite Pubbliche",
+"Pubblicazione Ufficiale", "Ministero della Giustizia", "ASTE GIUDIZIARIE", "pvp.giustizia.it".
+Focus ONLY on the substantive perizia content.
 
-Return STRICT JSON — no markdown, no extra keys:
+Return STRICT JSON with EXACTLY these keys (no markdown, no extra keys):
 
 {
-  "valore_perito":    { "status": "found"|"not_found", "value": "<monetary>"|null, "confidence": <0-1> },
-  "atti_antecedenti": { "status": "found"|"not_found", "summary": "<text>"|null,   "confidence": <0-1> },
-  "costi_oneri":      { "status": "found"|"not_found", "summary": "<text>"|null,   "confidence": <0-1> },
-  "difformita":       { "status": "found"|"not_found", "summary": "<text>"|null,   "confidence": <0-1> },
-  "riassunto": { "paragrafo1": "<string>", "paragrafo2": "<string>", "paragrafo3": "<string>" }
+  "valore_perito":    { "status": "found"|"not_found", "value": "€ 250.000,00"|null, "confidence": 0.0-1.0 },
+  "atti_antecedenti": { "status": "found"|"not_found", "summary": "<text>"|null, "confidence": 0.0-1.0 },
+  "costi_oneri":      { "status": "found"|"not_found", "summary": "<text>"|null, "confidence": 0.0-1.0 },
+  "difformita":       { "status": "found"|"not_found", "summary": "<text>"|null, "confidence": 0.0-1.0 },
+  "riassunto": { "paragrafo1": "<property & value summary>", "paragrafo2": "<risks & costs>", "paragrafo3": "<acts & actions>" },
+  "resoconto": {
+    "identificazione":   { "trovato": true, "valore": "<tipo, indirizzo, comune/prov, destinazione>", "cosa_dice": "<riassunto fedele max 3 frasi>", "cosa_significa": "<spiegazione semplice max 2 frasi>", "estratto": "<citazione testuale max 25 parole>", "pagina_rif": "Pagina X", "confidenza": "Alta|Media|Bassa" },
+    "dati_catastali":    { "trovato": true, "valore": "<foglio, particella, sub, cat, rendita, consistenza>", "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Alta" },
+    "superfici":         { "trovato": true, "valore": "<sup. commerciale/catastale/utile>", "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Media" },
+    "titolarita":        { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
+    "vincoli_ipoteche":  { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
+    "stato_occupativo":  { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
+    "conformita":        { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
+    "stato_manutentivo": { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
+    "spese_condominio":  { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
+    "valutazione":       { "trovato": false, "valore": null, "cosa_dice": null, "cosa_significa": null, "estratto": null, "pagina_rif": null, "confidenza": "Bassa" },
+    "rischi": [
+      { "descrizione": "<risk description>", "severita": "Alta|Media|Bassa", "cosa_significa": "<plain language for buyer>" }
+    ],
+    "checklist": ["<document/check 1>", "<document/check 2>"]
+  }
 }
 
 Rules:
-- confidence: 1.0=clear, 0.7=partial, 0.4=uncertain
+- confidence: 1.0=clear mention, 0.7=partial/inferred, 0.4=uncertain
 - if not_found → value/summary must be null
 - valore_perito.value format: "€ 250.000,00"
-- riassunto: 3 professional paragraphs summarising the perizia substance (property, value, risks)
-- If text seems partially watermarked, still extract what real content is present
-- Output ONLY the JSON object, no markdown fences, no explanation before or after`;
+- riassunto: 3 professional Italian paragraphs summarising property, value, risks
+- resoconto: for each sub-field, set trovato=true only if the information exists in the text; otherwise trovato=false and all other fields null
+- resoconto.estratto: verbatim text excerpt max 25 words; null if not found
+- resoconto.rischi: max 5 risks, ordered by severity (Alta first); cosa_significa must be simple plain language
+- resoconto.checklist: 8-12 concrete verification steps a buyer should take before bidding
+- Output ONLY the JSON object, no markdown fences, no explanation`;
 
 // ---------------------------------------------------------------------------
 // Retry on 429
@@ -175,6 +255,58 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, baseDelayMs = 
     }
   }
   throw new Error('unreachable');
+}
+
+// ---------------------------------------------------------------------------
+// Data quality gate — score 0-100 based on extraction results + text quality
+// ---------------------------------------------------------------------------
+
+function computeDataQualityScore(
+  data: z.infer<typeof Schema>,
+  finalCharsToLlm: number,
+  hasTextLayer: boolean,
+): { score: number; reason: string } {
+  const reasons: string[] = [];
+  let score = 0;
+
+  // Valore trovato (25 pts)
+  if (data.valore_perito.status === 'found' && data.valore_perito.value) {
+    score += 25;
+    reasons.push(`valore=${data.valore_perito.value.slice(0, 20)}`);
+  }
+
+  // Other fields found (10 pts each, max 30)
+  const othersFound = [data.atti_antecedenti, data.costi_oneri, data.difformita]
+    .filter(f => f.status === 'found').length;
+  score += othersFound * 10;
+  if (othersFound > 0) reasons.push(`${othersFound} altri campi`);
+
+  // Summary quality (max 15 pts)
+  const summaryLen = (
+    data.riassunto.paragrafo1 + data.riassunto.paragrafo2 + data.riassunto.paragrafo3
+  ).length;
+  const summaryPts = summaryLen > 600 ? 15 : summaryLen > 300 ? 10 : summaryLen > 100 ? 5 : 0;
+  score += summaryPts;
+  if (summaryPts > 0) reasons.push(`riassunto ${summaryLen}c`);
+
+  // Average confidence (max 15 pts)
+  const avgConf = (
+    data.valore_perito.confidence + data.atti_antecedenti.confidence +
+    data.costi_oneri.confidence + data.difformita.confidence
+  ) / 4;
+  score += Math.round(avgConf * 15);
+
+  // Chars sent to LLM (max 10 pts)
+  const charsPts = finalCharsToLlm > 8000 ? 10 : finalCharsToLlm > 3000 ? 6 : finalCharsToLlm > 500 ? 3 : 0;
+  score += charsPts;
+
+  // Native text layer bonus (5 pts)
+  if (hasTextLayer) { score += 5; reasons.push('strato testo nativo'); }
+
+  return {
+    score: Math.min(100, score),
+    reason: reasons.length > 0 ? reasons.join('; ') : 'dati insufficienti',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +347,7 @@ async function handleWithPdfVision(
   t0:         number,
   totalPages: number,
   extractionEngine: string,
+  extractedCharsTextLayer: number = 0,
 ): Promise<NextResponse> {
   console.log(
     `[analyze][${requestId}] PDF vision fallback: ` +
@@ -227,7 +360,7 @@ async function handleWithPdfVision(
     const response = await withRetry(() =>
       client.messages.create({
         model:       MODEL,
-        max_tokens:  2048,
+        max_tokens:  MAX_TOKENS,
         temperature: 0,
         system:      SYSTEM_PROMPT,
         messages: [{
@@ -295,24 +428,38 @@ async function handleWithPdfVision(
 
   const data = v.data;
 
+  const finalCharsVision = buffer.length; // approximate for PDF vision
+  const { score: dqScore, reason: dqReason } = computeDataQualityScore(data, finalCharsVision, false);
+  // isScanDetected=true only if OCR quality was too low to be useful
+  const scanDetected = dqScore < 60;
+  console.log(
+    `[analyze][${requestId}] PDF vision quality: score=${dqScore} reason="${dqReason}" scanDetected=${scanDetected}`,
+  );
+
   const debug: DebugInfo = {
     totalPages,
-    totalChars:          buffer.length,
-    charsPerPage:        [],
-    textCoverage:        0,
-    isScanDetected:      true,
-    hitsPerCategory:     {},
-    first2000chars:      '',
-    last2000chars:       '',
-    promptPayloadLength: buffer.length,
-    extractionEngine:    `${extractionEngine}+pdf_vision`,
+    totalChars:               buffer.length,
+    charsPerPage:             [],
+    textCoverage:             0,
+    isScanDetected:           scanDetected,
+    hitsPerCategory:          {},
+    first2000chars:           '',
+    last2000chars:            '',
+    promptPayloadLength:      buffer.length,
+    extractionEngine:         `${extractionEngine}+pdf_vision`,
+    has_text_layer:           false,
+    vision_used:              true,
+    extracted_chars_text_layer: extractedCharsTextLayer,
+    final_chars_sent_to_llm:  finalCharsVision,
+    data_quality_score:       dqScore,
+    data_quality_reason:      dqReason,
   };
 
   const meta: Meta = {
     analysis_mode:  'pdf_direct',
     total_pages:    totalPages,
     pages_analyzed: totalPages,
-    notes:          `Claude ${MODEL} PDF Vision · strato testo=solo watermark, analisi visiva PDF`,
+    notes:          `Claude ${MODEL} PDF Vision · strato testo=solo watermark, analisi visiva PDF · Q=${dqScore}`,
   };
 
   const result: AnalysisResult = {
@@ -321,11 +468,12 @@ async function handleWithPdfVision(
     costi_oneri:      { ...data.costi_oneri,      citations: [], candidates: [] },
     difformita:       { ...data.difformita,        citations: [], candidates: [] },
     riassunto:        data.riassunto,
+    resoconto_completo: data.resoconto as ResocontoCompleto | undefined,
     debug,
     meta,
   };
 
-  console.log(`[analyze][${requestId}] PDF vision OK total=${Date.now()-t0}ms`);
+  console.log(`[analyze][${requestId}] PDF vision OK Q=${dqScore} total=${Date.now()-t0}ms`);
   return NextResponse.json({ requestId, ...result });
 }
 
@@ -336,6 +484,7 @@ async function handleWithPdfVision(
 const MAX_BYTES      = (parseInt(process.env.MAX_PDF_MB        ?? '15',    10) || 15)    * 1024 * 1024;
 const LLM_TIMEOUT_MS =  parseInt(process.env.ANALYZE_TIMEOUT_MS ?? '50000', 10) || 50_000;
 const MAX_TEXT_CHARS = 80_000;
+const MAX_TOKENS     = 4096;
 const MODEL          = 'claude-haiku-4-5-20251001';
 
 function makeId() { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`; }
@@ -416,7 +565,7 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
       `(score=${contentScore} textLen=${totalTextLen}) — escalating to PDF vision`,
     );
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), timeout: LLM_TIMEOUT_MS });
-    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine);
+    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine, totalTextLen);
   }
 
   // ── Rank + select pages ──────────────────────────────────────────────────
@@ -444,7 +593,7 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
       `[analyze][${requestId}] usedTextLen=${usedTextLen} too low after ranking — PDF vision fallback`,
     );
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), timeout: LLM_TIMEOUT_MS });
-    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine);
+    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine, totalTextLen);
   }
 
   // ── Watermark filter (run on ALL pages for accurate frequency counts) ───
@@ -466,7 +615,7 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
       `content still too sparse, escalating to PDF vision`,
     );
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), timeout: LLM_TIMEOUT_MS });
-    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine);
+    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine, totalTextLen);
   }
 
   // ── Build anchored text (--- PAGE N --- format) ──────────────────────────
@@ -496,7 +645,7 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
     const response = await withRetry(() =>
       client.messages.create({
         model:       MODEL,
-        max_tokens:  2048,
+        max_tokens:  MAX_TOKENS,
         temperature: 0,
         system:      SYSTEM_PROMPT,
         messages:    [{ role: 'user', content: userMsg }],
@@ -532,21 +681,31 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
 
   const data = v.data;
 
+  // ── Data quality gate ─────────────────────────────────────────────────────
+  const { score: dqScore, reason: dqReason } = computeDataQualityScore(data, userMsg.length, true);
+  console.log(`[analyze][${requestId}] quality: score=${dqScore} reason="${dqReason}"`);
+
   // ── Build response ────────────────────────────────────────────────────────
   const avgCharsPerPage = totalPages > 0 ? Math.round(totalTextLen / totalPages) : 0;
 
   const debug: DebugInfo = {
     totalPages,
-    totalChars:          totalTextLen,
-    charsPerPage:        pages.map((p) => ({ page: p.page, chars: p.text.length })),
-    textCoverage:        avgCharsPerPage,
-    isScanDetected:      false,
-    hitsPerCategory:     {},
-    first2000chars:      anchoredText.slice(0, 2000),
-    last2000chars:       anchoredText.slice(-2000),
-    promptPayloadLength: userMsg.length,
+    totalChars:                totalTextLen,
+    charsPerPage:              pages.map((p) => ({ page: p.page, chars: p.text.length })),
+    textCoverage:              avgCharsPerPage,
+    isScanDetected:            false,
+    hitsPerCategory:           {},
+    first2000chars:            anchoredText.slice(0, 2000),
+    last2000chars:             anchoredText.slice(-2000),
+    promptPayloadLength:       userMsg.length,
     extractionEngine,
     extractionError,
+    has_text_layer:            true,
+    vision_used:               false,
+    extracted_chars_text_layer: totalTextLen,
+    final_chars_sent_to_llm:   userMsg.length,
+    data_quality_score:        dqScore,
+    data_quality_reason:       dqReason,
   };
 
   const evidence: Evidence = {
@@ -568,15 +727,16 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
     total_pages:    totalPages,
     pages_analyzed: selectedPageNums.length,
     pages_list:     selectedPageNums,
-    notes:          `Claude ${MODEL} · ${selectedPageNums.length}/${totalPages} pag.`,
+    notes:          `Claude ${MODEL} · ${selectedPageNums.length}/${totalPages} pag. · Q=${dqScore}`,
   };
 
   const result: AnalysisResult = {
-    valore_perito:    { ...data.valore_perito,    citations: [], candidates: [] },
-    atti_antecedenti: { ...data.atti_antecedenti, citations: [], candidates: [] },
-    costi_oneri:      { ...data.costi_oneri,      citations: [], candidates: [] },
-    difformita:       { ...data.difformita,        citations: [], candidates: [] },
-    riassunto:        data.riassunto,
+    valore_perito:      { ...data.valore_perito,    citations: [], candidates: [] },
+    atti_antecedenti:   { ...data.atti_antecedenti, citations: [], candidates: [] },
+    costi_oneri:        { ...data.costi_oneri,      citations: [], candidates: [] },
+    difformita:         { ...data.difformita,        citations: [], candidates: [] },
+    riassunto:          data.riassunto,
+    resoconto_completo: data.resoconto as ResocontoCompleto | undefined,
     debug, meta, evidence,
   };
 
