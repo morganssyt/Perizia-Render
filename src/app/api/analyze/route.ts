@@ -136,6 +136,12 @@ const Schema = z.object({
 const SYSTEM_PROMPT = `You are a legal real estate auction analyst.
 Extract structured data from the provided Italian perizia immobiliare text.
 
+IMPORTANT — IGNORE WATERMARKS: The text may contain repeated portal headers/footers from the
+Italian judicial auction portal (Portale Vendite Pubbliche / PVP). Completely ignore any line
+containing: "Portale delle Vendite Pubbliche", "Pubblicazione Ufficiale", "Ministero della
+Giustizia", "ASTE GIUDIZIARIE", "pvp.giustizia.it", "Decreto Ministeriale", page numbers alone,
+or any repeated disclaimer text. Focus ONLY on the substantive perizia content.
+
 Return STRICT JSON — no markdown, no extra keys:
 
 {
@@ -150,8 +156,8 @@ Rules:
 - confidence: 1.0=clear, 0.7=partial, 0.4=uncertain
 - if not_found → value/summary must be null
 - valore_perito.value format: "€ 250.000,00"
-- riassunto: professional, concise, 3 paragraphs
-- ignore watermarks: "Pubblicazione ufficiale", "ASTE GIUDIZIARIE", page numbers
+- riassunto: 3 professional paragraphs summarising the perizia substance (property, value, risks)
+- If text seems partially watermarked, still extract what real content is present
 - Output ONLY the JSON object, no markdown fences, no explanation before or after`;
 
 // ---------------------------------------------------------------------------
@@ -297,10 +303,10 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
 
   // ── Watermark filter (run on ALL pages for accurate frequency counts) ───
   const allTexts = pages.map((p) => p.text);
-  const { cleanedPages: allCleanedPages, watermarkFilteredCount } = removeWatermarkLines(allTexts);
-  // Map page number → cleaned text
+  const { cleanedPages: allCleanedPages, watermarkFilteredCount, fallbackPages } = removeWatermarkLines(allTexts);
+  // Map page number → cleaned text (fallback pages keep raw text)
   const cleanedPageMap = Object.fromEntries(pages.map((p, i) => [p.page, allCleanedPages[i] ?? '']));
-  console.log(`[analyze][${requestId}] watermark: filteredLines=${watermarkFilteredCount}`);
+  console.log(`[analyze][${requestId}] watermark: filteredLines=${watermarkFilteredCount} fallbackPages=${fallbackPages}`);
 
   // ── Build anchored text (--- PAGE N --- format) ──────────────────────────
   let anchoredText = selectedPageNums

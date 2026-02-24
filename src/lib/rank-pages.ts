@@ -66,10 +66,15 @@ export function rankPages(pages: Array<{ page: number; text: string }>): ScoredP
 export function selectPages(scored: ScoredPage[], totalPages: number): number[] {
   const selected = new Set<number>();
 
-  // Top 8 pages by score
+  // Top 12 pages by score (increased from 8)
   const sorted = [...scored].sort((a, b) => b.score - a.score);
-  for (const p of sorted.slice(0, 8)) {
+  for (const p of sorted.slice(0, 12)) {
     selected.add(p.page);
+  }
+
+  // Always include first 3 pages (often contain valuation summary)
+  for (let i = 1; i <= Math.min(3, totalPages); i++) {
+    selected.add(i);
   }
 
   // Index / sommario page (short page with structural keywords)
@@ -83,8 +88,8 @@ export function selectPages(scored: ScoredPage[], totalPages: number): number[] 
     }
   }
 
-  // Last 2 pages — often contain final valuation and signatures
-  for (let i = Math.max(1, totalPages - 1); i <= totalPages; i++) {
+  // Last 3 pages — often contain final valuation and signatures
+  for (let i = Math.max(1, totalPages - 2); i <= totalPages; i++) {
     selected.add(i);
   }
 
