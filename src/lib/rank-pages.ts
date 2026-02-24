@@ -17,8 +17,8 @@ const KEYWORDS_POSITIVE = [
 ];
 
 const KEYWORDS_NEGATIVE = [
-  'copyright', 'riproduzione', 'autorizzazione', 'ministeriale', 'diritti riservati',
-  'portale', 'avviso', 'pubblicazione ufficiale',
+  'copyright', 'riproduzione', 'diritti riservati',
+  'pubblicazione ufficiale',
 ];
 
 // ── Types ─────────────────────────────────────────────────────────────────────

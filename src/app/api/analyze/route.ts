@@ -264,8 +264,10 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
   const scored           = rankPages(pages);
   const selectedPageNums = selectPages(scored, totalPages);
   const pagesMap         = Object.fromEntries(pages.map((p) => [p.page, p]));
+  // Only report pages that are penalized AND not actually selected for analysis
+  const selectedSet      = new Set(selectedPageNums);
   const penalizedPages   = scored
-    .filter((s) => s.penalized)
+    .filter((s) => s.penalized && !selectedSet.has(s.page))
     .map((s) => ({ page: s.page, reason: s.penaltyReason ?? 'unknown' }));
 
   const usedTextLen = selectedPageNums.reduce(
@@ -293,17 +295,16 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
     );
   }
 
-  // ── Watermark filter ─────────────────────────────────────────────────────
-  const selectedTexts = selectedPageNums.map((pg) => pagesMap[pg]?.text ?? '');
-  const { cleanedPages, watermarkFilteredCount } = removeWatermarkLines(selectedTexts);
-  const cleanedMap = Object.fromEntries(
-    selectedPageNums.map((pg, i) => [pg, cleanedPages[i] ?? '']),
-  );
+  // ── Watermark filter (run on ALL pages for accurate frequency counts) ───
+  const allTexts = pages.map((p) => p.text);
+  const { cleanedPages: allCleanedPages, watermarkFilteredCount } = removeWatermarkLines(allTexts);
+  // Map page number → cleaned text
+  const cleanedPageMap = Object.fromEntries(pages.map((p, i) => [p.page, allCleanedPages[i] ?? '']));
   console.log(`[analyze][${requestId}] watermark: filteredLines=${watermarkFilteredCount}`);
 
   // ── Build anchored text (--- PAGE N --- format) ──────────────────────────
   let anchoredText = selectedPageNums
-    .map((pg) => `--- PAGE ${pg} ---\n${cleanedMap[pg] ?? ''}`)
+    .map((pg) => `--- PAGE ${pg} ---\n${cleanedPageMap[pg] ?? ''}`)
     .join('\n\n');
 
   if (anchoredText.length > MAX_TEXT_CHARS) {
