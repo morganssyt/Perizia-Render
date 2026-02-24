@@ -55,11 +55,11 @@ export function removeWatermarkLines(pages: string[]): WatermarkResult {
   // ── Step 2: identify watermark lines (>35% of pages, not whitelisted) ────
   const threshold      = pages.length * 0.35;
   const watermarkNorms = new Set<string>();
-  for (const [norm, count] of normFreq.entries()) {
+  Array.from(normFreq.entries()).forEach(([norm, count]) => {
     if (count > threshold) {
       watermarkNorms.add(norm);
     }
-  }
+  });
 
   // ── Step 3: filter each page ─────────────────────────────────────────────
   let watermarkFilteredCount = 0;
