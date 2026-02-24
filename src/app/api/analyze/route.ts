@@ -178,6 +178,158 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3, baseDelayMs = 
 }
 
 // ---------------------------------------------------------------------------
+// Real-content entity scoring (detects watermark-only text)
+// ---------------------------------------------------------------------------
+
+const ENTITY_PATTERNS_SCORE: RegExp[] = [
+  /\bfoglio\b/i, /\bparticella\b/i, /\bsubalterno\b/i, /\bcatasto\b/i, /\bmappale\b/i,
+  /€\s*[\d.,]+/,               // monetary values
+  /\d+[.,]\d+\s*m[q²2]/i,     // surface area
+  /\bstima\b/i, /\bvalore\b/i, /\bperito\b|\bctu\b/i,
+  /\bsuperficie\b/i, /\bdescriz/i, /\bpremessa\b/i,
+  /\bcomune\s+di\b/i, /\bvia\s+\w+\s+\d+/i,
+  /\bprocedura\s+esecutiva\b/i, /\boneri\b/i, /\bcondomin/i,
+];
+
+function scoreRealContent(pageTexts: string[]): number {
+  const fullText = pageTexts.join('\n');
+  let score = 0;
+  for (const re of ENTITY_PATTERNS_SCORE) {
+    if (re.test(fullText)) score++;
+  }
+  const digits = (fullText.match(/\d/g) ?? []).length;
+  const numericDensity = fullText.length > 0 ? digits / fullText.length : 0;
+  return score + (numericDensity > 0.04 ? 2 : 0);
+}
+
+// ---------------------------------------------------------------------------
+// Claude PDF Vision fallback
+// Sends the raw PDF buffer as a base64 document directly to Claude.
+// Used when the text layer contains only watermark/header text.
+// ---------------------------------------------------------------------------
+
+async function handleWithPdfVision(
+  client:     Anthropic,
+  buffer:     Buffer,
+  requestId:  string,
+  t0:         number,
+  totalPages: number,
+  extractionEngine: string,
+): Promise<NextResponse> {
+  console.log(
+    `[analyze][${requestId}] PDF vision fallback: ` +
+    `sending ${(buffer.length / 1024).toFixed(0)}KB PDF directly to Claude`,
+  );
+
+  let rawText = '';
+  try {
+    const pdfBase64 = buffer.toString('base64');
+    const response = await withRetry(() =>
+      client.messages.create({
+        model:       MODEL,
+        max_tokens:  2048,
+        temperature: 0,
+        system:      SYSTEM_PROMPT,
+        messages: [{
+          role: 'user',
+          content: [
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 },
+            } as any,
+            {
+              type: 'text',
+              text: (
+                'Analizza questa perizia immobiliare. ' +
+                'Ignora completamente: "Portale Vendite Pubbliche", "Pubblicazione Ufficiale", ' +
+                '"Ministero della Giustizia", "ASTE GIUDIZIARIE", pvp.giustizia.it, ' +
+                'e qualsiasi watermark ripetuto. ' +
+                'Estrai SOLO il contenuto reale della perizia.'
+              ),
+            },
+          ],
+        }],
+      })
+    );
+    rawText = response.content[0]?.type === 'text' ? response.content[0].text : '';
+    console.log(
+      `[analyze][${requestId}] PDF vision done rawTextLen=${rawText.length} (+${Date.now()-t0}ms)`,
+    );
+  } catch (e) {
+    const detail = e instanceof Anthropic.APIError
+      ? `Anthropic ${e.status}: ${e.message}`
+      : String(e);
+    console.error(`[analyze][${requestId}] PDF vision error:`, detail);
+    return err(
+      requestId,
+      'Impossibile analizzare il PDF: documento scansionato senza testo leggibile, ' +
+      'oppure il file è troppo grande o protetto.',
+      422,
+      { detail, hint: 'Carica un PDF con testo selezionabile, oppure usa la pipeline con Textract.' },
+    );
+  }
+
+  if (!rawText.trim()) {
+    return err(requestId, 'Claude PDF vision: risposta vuota. Riprova.', 502);
+  }
+
+  const jsonText = rawText.trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '');
+
+  let parsed: unknown;
+  try { parsed = JSON.parse(jsonText); }
+  catch {
+    return err(requestId, 'Risposta Claude PDF vision non è JSON valido.', 502, {
+      raw: jsonText.slice(0, 500),
+    });
+  }
+
+  const v = Schema.safeParse(parsed);
+  if (!v.success) {
+    return err(requestId, 'Schema JSON non valido (PDF vision).', 502, {
+      issues: v.error.issues, raw: parsed,
+    });
+  }
+
+  const data = v.data;
+
+  const debug: DebugInfo = {
+    totalPages,
+    totalChars:          buffer.length,
+    charsPerPage:        [],
+    textCoverage:        0,
+    isScanDetected:      true,
+    hitsPerCategory:     {},
+    first2000chars:      '',
+    last2000chars:       '',
+    promptPayloadLength: buffer.length,
+    extractionEngine:    `${extractionEngine}+pdf_vision`,
+  };
+
+  const meta: Meta = {
+    analysis_mode:  'pdf_direct',
+    total_pages:    totalPages,
+    pages_analyzed: totalPages,
+    notes:          `Claude ${MODEL} PDF Vision · strato testo=solo watermark, analisi visiva PDF`,
+  };
+
+  const result: AnalysisResult = {
+    valore_perito:    { ...data.valore_perito,    citations: [], candidates: [] },
+    atti_antecedenti: { ...data.atti_antecedenti, citations: [], candidates: [] },
+    costi_oneri:      { ...data.costi_oneri,      citations: [], candidates: [] },
+    difformita:       { ...data.difformita,        citations: [], candidates: [] },
+    riassunto:        data.riassunto,
+    debug,
+    meta,
+  };
+
+  console.log(`[analyze][${requestId}] PDF vision OK total=${Date.now()-t0}ms`);
+  return NextResponse.json({ requestId, ...result });
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -249,21 +401,22 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
     (extractionError ? ` ERROR: ${extractionError}` : ''),
   );
 
-  // ── Fail-fast: scan / protected PDF ──────────────────────────────────────
-  if (totalTextLen < 300) {
-    console.error(
-      `[analyze][${requestId}] FAIL-FAST totalTextLen=${totalTextLen} — ` +
-      `PDF probabilmente scannerizzato o protetto`,
+  // ── Content scoring: detect watermark-only text layer ───────────────────
+  const contentScore = scoreRealContent(pages.map((p) => p.text));
+  console.log(
+    `[analyze][${requestId}] contentScore=${contentScore} totalTextLen=${totalTextLen}`,
+  );
+
+  // ── If text layer has no real content → Claude PDF Vision ────────────────
+  // PVP portal PDFs have a text layer with only watermark text; actual perizia
+  // is scanned. pdf-parse cannot read it. Claude can via document vision.
+  if (totalTextLen < 300 || contentScore < 4) {
+    console.log(
+      `[analyze][${requestId}] Text layer is watermark-only or empty ` +
+      `(score=${contentScore} textLen=${totalTextLen}) — escalating to PDF vision`,
     );
-    return err(
-      requestId,
-      'PDF probabilmente scannerizzato o protetto — testo non leggibile.',
-      422,
-      {
-        detail: `Estratti ${totalTextLen} caratteri totali su ${totalPages} pagine. ` +
-                `Il PDF non contiene testo selezionabile.`,
-      },
-    );
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), timeout: LLM_TIMEOUT_MS });
+    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine);
   }
 
   // ── Rank + select pages ──────────────────────────────────────────────────
@@ -287,18 +440,11 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
   );
 
   if (usedTextLen < 300) {
-    console.error(
-      `[analyze][${requestId}] FAIL-FAST usedTextLen=${usedTextLen} — testo rilevante insufficiente`,
+    console.log(
+      `[analyze][${requestId}] usedTextLen=${usedTextLen} too low after ranking — PDF vision fallback`,
     );
-    return err(
-      requestId,
-      'Testo rilevante insufficiente — il PDF potrebbe contenere solo copertina o copyright.',
-      422,
-      {
-        detail: `Estratti ${usedTextLen} caratteri utili su ${selectedPageNums.length} ` +
-                `pagine selezionate (${totalTextLen} totali).`,
-      },
-    );
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), timeout: LLM_TIMEOUT_MS });
+    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine);
   }
 
   // ── Watermark filter (run on ALL pages for accurate frequency counts) ───
@@ -306,7 +452,22 @@ async function handleRequest(req: NextRequest, requestId: string, t0: number): P
   const { cleanedPages: allCleanedPages, watermarkFilteredCount, fallbackPages } = removeWatermarkLines(allTexts);
   // Map page number → cleaned text (fallback pages keep raw text)
   const cleanedPageMap = Object.fromEntries(pages.map((p, i) => [p.page, allCleanedPages[i] ?? '']));
-  console.log(`[analyze][${requestId}] watermark: filteredLines=${watermarkFilteredCount} fallbackPages=${fallbackPages}`);
+  const cleanedScore = scoreRealContent(allCleanedPages);
+  const cleanedLen   = allCleanedPages.reduce((s, p) => s + p.length, 0);
+  console.log(
+    `[analyze][${requestId}] watermark: filteredLines=${watermarkFilteredCount} ` +
+    `fallbackPages=${fallbackPages} cleanedLen=${cleanedLen} cleanedScore=${cleanedScore}`,
+  );
+
+  // If watermark filter leaves almost nothing, escalate to PDF vision
+  if (cleanedScore < 3 && cleanedLen < 1500) {
+    console.log(
+      `[analyze][${requestId}] After watermark filter: score=${cleanedScore} len=${cleanedLen} — ` +
+      `content still too sparse, escalating to PDF vision`,
+    );
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), timeout: LLM_TIMEOUT_MS });
+    return handleWithPdfVision(client, buffer, requestId, t0, totalPages, extractionEngine);
+  }
 
   // ── Build anchored text (--- PAGE N --- format) ──────────────────────────
   let anchoredText = selectedPageNums
