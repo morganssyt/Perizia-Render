@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 
 const LogoIcon = () => (
   <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -11,14 +11,8 @@ const LogoIcon = () => (
 );
 
 export default function PublicHeader() {
-  const [isAuth, setIsAuth] = useState(false);
-
-  useEffect(() => {
-    try {
-      setIsAuth(!!localStorage.getItem('pa_user'));
-    } catch { /* ok */ }
-  }, []);
-
+  const { status } = useSession();
+  const isAuth = status === 'authenticated';
   const logoHref = isAuth ? '/app' : '/';
 
   return (

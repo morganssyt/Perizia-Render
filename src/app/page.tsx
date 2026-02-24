@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import PublicHeader from '@/components/PublicHeader';
 
 // ─── Product mockup ────────────────────────────────────────────────────────────
@@ -416,20 +416,12 @@ function PublicLanding() {
 
 export default function RootPage() {
   const router = useRouter();
-  const [checked, setChecked] = useState(false);
+  const { status } = useSession();
 
-  useEffect(() => {
-    try {
-      const user = localStorage.getItem('pa_user');
-      if (user) {
-        router.replace('/app');
-        return;
-      }
-    } catch { /* ok */ }
-    setChecked(true);
-  }, [router]);
-
-  if (!checked) return <div className="min-h-screen bg-white" />;
+  if (status === 'authenticated') {
+    router.replace('/app');
+    return <div className="min-h-screen bg-white" />;
+  }
 
   return <PublicLanding />;
 }
