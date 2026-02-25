@@ -1,19 +1,20 @@
-FROM node:20
+FROM node:20-slim
+
+RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy root prisma schema
+# Copy root prisma schema (needed for prisma generate)
 COPY prisma/ ./prisma/
 
-# Copy worker files
-COPY worker/package.json ./worker/package.json
-COPY worker/tsconfig.json ./worker/tsconfig.json
-COPY worker/src/ ./worker/src/
+# Copy pre-compiled worker (dist/ is compiled locally)
+COPY worker/package.json ./
+COPY worker/dist/ ./dist/
 
-WORKDIR /app/worker
+# Install production deps only (no compilation needed)
+RUN npm install --omit=dev --ignore-scripts
 
-RUN npm install --ignore-scripts
+# Generate Prisma client for linux target
 RUN npx prisma generate --schema=../prisma/schema.prisma
-RUN npm run build
 
 CMD ["node", "dist/index.js"]
