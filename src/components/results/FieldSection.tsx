@@ -168,7 +168,7 @@ export default function FieldSection({
             )}
 
             {/* Citations */}
-            {hasCitations ? (
+            {hasCitations && (
               <div className="space-y-1 mt-1">
                 {(field.citations ?? []).slice(0, 3).map((c, i) => (
                   <div
@@ -197,10 +197,6 @@ export default function FieldSection({
                   </div>
                 ))}
               </div>
-            ) : (
-              <p className="text-xs text-slate-400 italic mt-1">
-                Evidenze testuali non disponibili in questa versione.
-              </p>
             )}
           </>
         )}

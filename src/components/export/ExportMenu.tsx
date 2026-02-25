@@ -14,6 +14,7 @@ interface Props {
 export default function ExportMenu({ result, fileName, notes, verified }: Props) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const analyzedAt = new Date().toLocaleString('it-IT', {
@@ -48,17 +49,40 @@ export default function ExportMenu({ result, fileName, notes, verified }: Props)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, fileName, notes, verified]);
 
-  const handlePrint = useCallback(() => {
-    window.print();
+  const handleDownloadPdf = useCallback(async () => {
     setOpen(false);
-  }, []);
+    if (pdfLoading) return;
+    setPdfLoading(true);
+    try {
+      const res = await fetch('/api/reports/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result, fileName }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = fileName.replace(/\.pdf$/i, '') + '_resoconto.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch {
+      alert('Errore durante la generazione del PDF. Riprova.');
+    } finally {
+      setPdfLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, fileName, pdfLoading]);
 
   const menuItems = [
     {
-      icon: '🖨️',
-      label: 'Stampa / PDF',
-      sub: 'Scheda stampabile A4',
-      onClick: handlePrint,
+      icon: pdfLoading ? '⏳' : '📄',
+      label: pdfLoading ? 'Generazione PDF…' : 'Scarica PDF',
+      sub: 'Report professionale A4',
+      onClick: handleDownloadPdf,
       border: false,
     },
     {

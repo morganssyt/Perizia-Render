@@ -22,7 +22,7 @@ if (fs.existsSync(workerSrc)) {
 const EXTERNAL_PACKAGES = [
   'pdf-parse', 'pdfjs-dist', '@napi-rs/canvas', 'openai', '@anthropic-ai/sdk',
   'bullmq', 'ioredis', '@aws-sdk/client-s3', '@aws-sdk/client-textract', '@aws-sdk/s3-request-presigner',
-  'bcryptjs',
+  'bcryptjs', 'pdfkit',
 ];
 
 /** @type {import('next').NextConfig} */

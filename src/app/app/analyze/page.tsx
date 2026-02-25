@@ -21,7 +21,6 @@ import ExportMenu from '@/components/export/ExportMenu';
 import VerifyWorkflow from '@/components/verify/VerifyWorkflow';
 import RiskPanel from '@/components/results/RiskPanel';
 import { saveToHistory } from '@/lib/history';
-import { openAndPrintResoconto } from '@/lib/generate-resoconto-pdf';
 
 const PdfViewer = dynamic(() => import('@/components/PdfViewer'), {
   ssr: false,
@@ -709,6 +708,9 @@ export default function AnalizzaPage() {
   const stepIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [reasoning, setReasoning] = useState<Record<string, unknown> | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [pdfDebug, setPdfDebug] = useState<PdfDebugInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -865,6 +867,10 @@ export default function AnalizzaPage() {
             };
 
             setResult(mapped);
+            // Capture reasoning for PDF generation
+            if (raw.reasoning && typeof raw.reasoning === 'object') {
+              setReasoning(raw.reasoning as Record<string, unknown>);
+            }
             try { saveToHistory(file.name, mapped); } catch { /* ok */ }
             return;
           }
@@ -889,6 +895,8 @@ export default function AnalizzaPage() {
     setFile(null);
     setFileUrl(null);
     setResult(null);
+    setReasoning(null);
+    setPdfError(null);
     setRequestId(null);
     setError(null);
     setApiError(null);
@@ -896,6 +904,41 @@ export default function AnalizzaPage() {
     setShowDebug(false);
     setTargetPage(undefined);
   }, [fileUrl]);
+
+  // ── PDF download ────────────────────────────────────────────────────────
+  const handleDownloadPdf = useCallback(async () => {
+    if (!result) return;
+    setPdfLoading(true);
+    setPdfError(null);
+    try {
+      const res = await fetch('/api/reports/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          result,
+          reasoning: reasoning ?? undefined,
+          fileName: file?.name ?? 'perizia.pdf',
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error((j as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = (file?.name ?? 'perizia').replace(/\.pdf$/i, '') + '_resoconto.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      setPdfError(e instanceof Error ? e.message : 'Errore generazione PDF.');
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [result, reasoning, file]);
 
   const debugData = result?.debug ?? apiError?.debug ?? null;
 
@@ -1272,18 +1315,31 @@ export default function AnalizzaPage() {
                   <div>
                     <p className="text-sm font-bold text-blue-900">Resoconto completo in PDF</p>
                     <p className="text-xs text-blue-600 mt-0.5">
-                      Genera un PDF professionale con copertina, indice, tutte le sezioni e appendice fonti.
+                      Scarica un PDF professionale con copertina, indice, analisi del rischio, scenari offerta e appendice fonti.
                     </p>
+                    {pdfError && (
+                      <p className="text-xs text-red-600 mt-1 font-medium">Errore: {pdfError}</p>
+                    )}
                   </div>
                   <button
-                    onClick={() => openAndPrintResoconto(result, file?.name ?? 'perizia.pdf')}
-                    className="flex-shrink-0 flex items-center gap-2 bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-blue-800 active:scale-[0.98] transition-all shadow-sm"
+                    onClick={handleDownloadPdf}
+                    disabled={pdfLoading}
+                    className="flex-shrink-0 flex items-center gap-2 bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-blue-800 active:scale-[0.98] transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    Vedi il resoconto (PDF)
+                    {pdfLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Generazione…
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Scarica PDF
+                      </>
+                    )}
                   </button>
                 </div>
 
