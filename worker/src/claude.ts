@@ -11,7 +11,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 
 const MODEL    = 'claude-haiku-4-5-20251001';
-const MAX_TOKENS = 2048;
+const MAX_TOKENS = 4096;
 const MAX_TEXT_CHARS = 80_000;
 
 let _client: Anthropic | null = null;
