@@ -779,45 +779,32 @@ export default function AnalizzaPage() {
       setLoadingStepIdx(0);
 
       try {
-        // ── Try new async flow: upload → S3 → BullMQ → poll ───────────────
+        // ── Async flow: upload → S3 → BullMQ → poll ───────────────────────
         let uploadData: { jobId: string; documentId: string; s3Uploaded: boolean } | null = null;
+        let uploadErrorMsg: string | null = null;
         try {
           const fd = new FormData();
           fd.append('file', file);
           const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd });
-          if (uploadRes.ok) uploadData = await uploadRes.json();
-        } catch { /* fall through to sync */ }
-
-        // ── If S3 not available → fall back to sync /api/analyze ──────────
-        if (!uploadData?.s3Uploaded) {
-          setLoadingStepIdx(2);
-          const fd = new FormData();
-          fd.append('file', file);
-          let res: Response;
-          try {
-            res = await fetch('/api/analyze', { method: 'POST', body: fd });
-          } catch (networkErr) {
-            setError(`Impossibile raggiungere il server: ${networkErr instanceof Error ? networkErr.message : String(networkErr)}`);
-            return;
+          const uploadJson = await uploadRes.json().catch(() => ({}));
+          if (uploadRes.ok) {
+            uploadData = uploadJson;
+          } else {
+            uploadErrorMsg = (uploadJson as { error?: string }).error ?? `Errore upload HTTP ${uploadRes.status}`;
           }
-          let payload: unknown;
-          try {
-            payload = res.headers.get('content-type')?.includes('application/json')
-              ? await res.json()
-              : { error: `HTTP ${res.status}`, detail: await res.text() };
-          } catch (e) { payload = { error: `HTTP ${res.status}`, detail: String(e) }; }
+        } catch (e) {
+          uploadErrorMsg = `Impossibile contattare il server: ${e instanceof Error ? e.message : String(e)}`;
+        }
 
-          if (!res.ok || (typeof payload === 'object' && payload !== null && 'error' in payload)) {
-            const apiErr = payload as ApiError;
-            setError(friendlyErrorMessage(res.status, apiErr.error ?? ''));
-            setApiError({ ...apiErr, httpStatus: res.status });
-            return;
-          }
-          const r = payload as AnalysisResult & { pdfDebug?: PdfDebugInfo; requestId?: string };
-          setResult(r);
-          if (r.requestId) setRequestId(r.requestId);
-          if (r.pdfDebug) setPdfDebug(r.pdfDebug);
-          try { saveToHistory(file.name, r); } catch { /* ok */ }
+        if (!uploadData) {
+          setError(uploadErrorMsg ?? 'Upload fallito. Riprova.');
+          setApiError({ error: uploadErrorMsg ?? 'upload_failed' });
+          return;
+        }
+
+        if (!uploadData.s3Uploaded) {
+          setError('Storage cloud non disponibile. Contatta il supporto (S3_BUCKET non configurato).');
+          setApiError({ error: 's3_not_configured' });
           return;
         }
 
