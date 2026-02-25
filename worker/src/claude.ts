@@ -97,7 +97,12 @@ export interface ExtractionResult {
   difformita:       { status: 'found' | 'not_found'; summary: string | null; confidence: number };
   riassunto:        { paragrafo1: string; paragrafo2: string; paragrafo3: string };
 }
-export type ReasoningResult  = z.infer<typeof ReasoningSchema>;
+export interface ReasoningResult {
+  risk_score:       number;
+  max_bid_scenari:  { conservativo: string; base: string; aggressivo: string };
+  checklist:        { item: string; done: boolean; priority: 'alta' | 'media' | 'bassa' }[];
+  sintesi_esito:    'verde' | 'giallo' | 'rosso';
+}
 
 export interface FullAnalysis {
   extraction: ExtractionResult;
@@ -260,7 +265,17 @@ export async function analyzeWithClaude(pageTexts: string[]): Promise<FullAnalys
     return callClaude('Sei un assistente JSON. Restituisci SOLO JSON valido.', repairPrompt);
   };
 
-  const reasoning = await parseWithRetry(raw2, ReasoningSchema, repairReasoning, 2, normalizeReasoning);
+  const reasoningRaw = await parseWithRetry(raw2, ReasoningSchema, repairReasoning, 2, normalizeReasoning);
+  const reasoning: ReasoningResult = {
+    risk_score:      reasoningRaw.risk_score,
+    max_bid_scenari: reasoningRaw.max_bid_scenari,
+    checklist:       (reasoningRaw.checklist ?? []).map(c => ({
+      item:     c.item,
+      done:     c.done     ?? false,
+      priority: c.priority ?? 'media',
+    })),
+    sintesi_esito:   reasoningRaw.sintesi_esito,
+  };
   console.log(`[claude] Step 2 done: risk_score=${reasoning.risk_score} esito=${reasoning.sintesi_esito}`);
 
   return { extraction, reasoning };
