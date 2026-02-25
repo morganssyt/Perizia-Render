@@ -1,7 +1,4 @@
-FROM node:20-slim
-
-# Prisma 5.x requires openssl on Debian slim
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+FROM node:20
 
 WORKDIR /app
 
@@ -15,7 +12,7 @@ COPY worker/src/ ./worker/src/
 
 WORKDIR /app/worker
 
-RUN npm install
+RUN npm install --ignore-scripts
 RUN npx prisma generate --schema=../prisma/schema.prisma
 RUN npm run build
 
