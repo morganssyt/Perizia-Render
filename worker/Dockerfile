@@ -1,7 +1,7 @@
-FROM node:20-alpine
+FROM node:20-slim
 
-# Prisma 5.x requires openssl on Alpine (musl libc)
-RUN apk add --no-cache openssl
+# Prisma 5.x requires openssl on Debian slim
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
