@@ -54,18 +54,24 @@ const ExtractionSchema = z.object({
   }),
 });
 
+// Coerce any value to a string (handles cases where Claude returns an object)
+const coerceString = z.preprocess(
+  (v) => (typeof v === 'string' ? v : v != null ? JSON.stringify(v) : ''),
+  z.string(),
+);
+
 const ReasoningSchema = z.object({
   risk_score: z.number().min(0).max(10),
   max_bid_scenari: z.object({
-    conservativo: z.string(),
-    base:         z.string(),
-    aggressivo:   z.string(),
+    conservativo: coerceString,
+    base:         coerceString,
+    aggressivo:   coerceString,
   }),
   checklist: z.array(z.object({
     item:      z.string(),
-    done:      z.boolean(),
-    priority:  z.enum(['alta', 'media', 'bassa']),
-  })),
+    done:      z.boolean().optional().default(false),
+    priority:  z.enum(['alta', 'media', 'bassa']).optional().default('media'),
+  })).optional().default([]),
   sintesi_esito: z.enum(['verde', 'giallo', 'rosso']),
 });
 
