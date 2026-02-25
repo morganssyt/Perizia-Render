@@ -54,26 +54,41 @@ const ExtractionSchema = z.object({
   }),
 });
 
-// Coerce any value to a string (handles cases where Claude returns an object)
-const coerceString = z.preprocess(
-  (v) => (typeof v === 'string' ? v : v != null ? JSON.stringify(v) : ''),
-  z.string(),
-);
-
 const ReasoningSchema = z.object({
   risk_score: z.number().min(0).max(10),
   max_bid_scenari: z.object({
-    conservativo: coerceString,
-    base:         coerceString,
-    aggressivo:   coerceString,
+    conservativo: z.string(),
+    base:         z.string(),
+    aggressivo:   z.string(),
   }),
   checklist: z.array(z.object({
     item:      z.string(),
-    done:      z.boolean().optional().default(false),
-    priority:  z.enum(['alta', 'media', 'bassa']).optional().default('media'),
-  })).optional().default([]),
+    done:      z.boolean().default(false),
+    priority:  z.enum(['alta', 'media', 'bassa']).default('media'),
+  })).default([]),
   sintesi_esito: z.enum(['verde', 'giallo', 'rosso']),
 });
+
+// Normalize reasoning object before Zod validation.
+// Claude sometimes returns objects instead of strings for max_bid_scenari fields.
+function normalizeReasoning(obj: unknown): unknown {
+  if (!obj || typeof obj !== 'object') return obj;
+  const o = { ...(obj as Record<string, unknown>) };
+
+  if (o.max_bid_scenari && typeof o.max_bid_scenari === 'object') {
+    const s = o.max_bid_scenari as Record<string, unknown>;
+    const toStr = (v: unknown) => typeof v === 'string' ? v : v != null ? JSON.stringify(v) : '';
+    o.max_bid_scenari = {
+      conservativo: toStr(s.conservativo),
+      base:         toStr(s.base),
+      aggressivo:   toStr(s.aggressivo),
+    };
+  }
+
+  if (!Array.isArray(o.checklist)) o.checklist = [];
+
+  return o;
+}
 
 export interface ExtractionResult {
   valore_perito:    { status: 'found' | 'not_found'; value: string | null; confidence: number };
@@ -114,11 +129,13 @@ async function parseWithRetry<T>(
   schema: z.ZodType<T>,
   repairFn: (bad: string) => Promise<string>,
   maxRetries = 2,
+  normalize?: (obj: unknown) => unknown,
 ): Promise<T> {
   let text = stripFences(raw);
   for (let i = 0; i <= maxRetries; i++) {
     try {
-      const obj = JSON.parse(text);
+      const parsed = JSON.parse(text);
+      const obj = normalize ? normalize(parsed) : parsed;
       const result = schema.safeParse(obj);
       if (result.success) return result.data;
       // Zod failed — try repair
@@ -243,7 +260,7 @@ export async function analyzeWithClaude(pageTexts: string[]): Promise<FullAnalys
     return callClaude('Sei un assistente JSON. Restituisci SOLO JSON valido.', repairPrompt);
   };
 
-  const reasoning = await parseWithRetry(raw2, ReasoningSchema, repairReasoning);
+  const reasoning = await parseWithRetry(raw2, ReasoningSchema, repairReasoning, 2, normalizeReasoning);
   console.log(`[claude] Step 2 done: risk_score=${reasoning.risk_score} esito=${reasoning.sintesi_esito}`);
 
   return { extraction, reasoning };
