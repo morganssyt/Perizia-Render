@@ -12,7 +12,7 @@ import type { AnalysisResult, ResocontoCompleto, ResocontoField } from '@/app/ap
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface SectionDef {
-  key: keyof Omit<ResocontoCompleto, 'rischi' | 'checklist'>;
+  key: keyof Omit<ResocontoCompleto, 'rischi' | 'checklist' | 'vincoli_dettaglio'>;
   num: string;
   title: string;
 }
