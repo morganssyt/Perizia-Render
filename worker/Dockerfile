@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+# Prisma 5.x requires openssl on Alpine (musl libc)
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 
 # Copy root prisma schema
