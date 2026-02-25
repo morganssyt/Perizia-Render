@@ -8,7 +8,7 @@ import type { ResocontoCompleto, ResocontoField } from '@/app/api/analyze/route'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SECTIONS: Array<{
-  key: keyof Omit<ResocontoCompleto, 'rischi' | 'checklist'>;
+  key: keyof Omit<ResocontoCompleto, 'rischi' | 'checklist' | 'vincoli_dettaglio'>;
   num: string;
   title: string;
   icon: string;
