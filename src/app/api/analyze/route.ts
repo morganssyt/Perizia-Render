@@ -92,6 +92,7 @@ export interface ResocontoField {
   estratto: string | null;
   pagina_rif: string | null;
   confidenza: 'Alta' | 'Media' | 'Bassa';
+  azioni_consigliate?: string | null;
 }
 
 export interface ResocontoCompleto {
@@ -105,8 +106,23 @@ export interface ResocontoCompleto {
   stato_manutentivo: ResocontoField;
   spese_condominio: ResocontoField;
   valutazione: ResocontoField;
-  rischi: Array<{ descrizione: string; severita: 'Alta' | 'Media' | 'Bassa'; cosa_significa: string }>;
+  rischi: Array<{
+    descrizione: string;
+    severita: 'Alta' | 'Media' | 'Bassa';
+    cosa_significa: string;
+    dimensione_impatto?: string[];
+    perche?: string | null;
+    cosa_fare?: string | null;
+  }>;
   checklist: string[];
+  vincoli_dettaglio?: Array<{
+    tipo: string;
+    importo?: string | null;
+    soggetto?: string | null;
+    data?: string | null;
+    severita?: 'Alta' | 'Media' | 'Bassa' | null;
+    note_operative?: string | null;
+  }>;
 }
 
 export interface Evidence {
@@ -157,13 +173,23 @@ const FieldBase = z.object({
 });
 
 const ResocontoFieldZ = z.object({
-  trovato:        z.boolean().default(false),
-  valore:         z.string().nullable().default(null),
-  cosa_dice:      z.string().nullable().default(null),
-  cosa_significa: z.string().nullable().default(null),
-  estratto:       z.string().nullable().default(null),
-  pagina_rif:     z.string().nullable().default(null),
-  confidenza:     z.enum(['Alta', 'Media', 'Bassa']).default('Media'),
+  trovato:             z.boolean().default(false),
+  valore:              z.string().nullable().default(null),
+  cosa_dice:           z.string().nullable().default(null),
+  cosa_significa:      z.string().nullable().default(null),
+  estratto:            z.string().nullable().default(null),
+  pagina_rif:          z.string().nullable().default(null),
+  confidenza:          z.enum(['Alta', 'Media', 'Bassa']).default('Media'),
+  azioni_consigliate:  z.string().nullable().optional(),
+});
+
+const VincoloDettaglioZ = z.object({
+  tipo:           z.string(),
+  importo:        z.string().nullable().optional(),
+  soggetto:       z.string().nullable().optional(),
+  data:           z.string().nullable().optional(),
+  severita:       z.enum(['Alta', 'Media', 'Bassa']).nullable().optional(),
+  note_operative: z.string().nullable().optional(),
 });
 
 const Schema = z.object({
@@ -173,22 +199,26 @@ const Schema = z.object({
   difformita:       FieldBase.extend({ summary: z.string().nullable() }),
   riassunto: z.object({ paragrafo1: z.string(), paragrafo2: z.string(), paragrafo3: z.string() }),
   resoconto: z.object({
-    identificazione:  ResocontoFieldZ,
-    dati_catastali:   ResocontoFieldZ,
-    superfici:        ResocontoFieldZ,
-    titolarita:       ResocontoFieldZ,
-    vincoli_ipoteche: ResocontoFieldZ,
-    stato_occupativo: ResocontoFieldZ,
-    conformita:       ResocontoFieldZ,
+    identificazione:   ResocontoFieldZ,
+    dati_catastali:    ResocontoFieldZ,
+    superfici:         ResocontoFieldZ,
+    titolarita:        ResocontoFieldZ,
+    vincoli_ipoteche:  ResocontoFieldZ,
+    stato_occupativo:  ResocontoFieldZ,
+    conformita:        ResocontoFieldZ,
     stato_manutentivo: ResocontoFieldZ,
-    spese_condominio: ResocontoFieldZ,
-    valutazione:      ResocontoFieldZ,
+    spese_condominio:  ResocontoFieldZ,
+    valutazione:       ResocontoFieldZ,
     rischi: z.array(z.object({
-      descrizione:    z.string(),
-      severita:       z.enum(['Alta', 'Media', 'Bassa']),
-      cosa_significa: z.string(),
+      descrizione:         z.string(),
+      severita:            z.enum(['Alta', 'Media', 'Bassa']),
+      cosa_significa:      z.string(),
+      dimensione_impatto:  z.array(z.string()).optional().default([]),
+      perche:              z.string().nullable().optional(),
+      cosa_fare:           z.string().nullable().optional(),
     })).default([]),
-    checklist: z.array(z.string()).default([]),
+    checklist:          z.array(z.string()).default([]),
+    vincoli_dettaglio:  z.array(VincoloDettaglioZ).optional().default([]),
   }).optional(),
 });
 
@@ -196,45 +226,54 @@ const Schema = z.object({
 // System prompt (unchanged)
 // ---------------------------------------------------------------------------
 
-// Each resoconto section uses: {trovato, valore, cosa_dice, cosa_significa, estratto, pagina_rif, confidenza}
-// Omitted from prompt for brevity — kept in RESOCONTO_SECTION_SCHEMA for reference
-const _RESOCONTO_SECTION_SCHEMA = '{"trovato":bool,"valore":"...or null","cosa_dice":"...or null","cosa_significa":"...or null","estratto":"verbatim ≤25 words or null","pagina_rif":"Pagina X or null","confidenza":"Alta|Media|Bassa"}';
-
-const SYSTEM_PROMPT = `You are a legal real estate auction analyst specializing in Italian perizia immobiliare documents.
+const SYSTEM_PROMPT = `You are a senior legal real estate due-diligence analyst specializing in Italian perizia immobiliare for judicial auctions.
 IGNORE WATERMARKS: skip all lines with "Portale delle Vendite Pubbliche", "Pubblicazione Ufficiale", "Ministero della Giustizia", "ASTE GIUDIZIARIE", "pvp.giustizia.it".
 
 Output ONLY a single JSON object (no markdown, no extra text):
 
 {
   "valore_perito":    {"status":"found|not_found","value":"€ 250.000,00 or null","confidence":0.0-1.0},
-  "atti_antecedenti": {"status":"found|not_found","summary":"text or null","confidence":0.0-1.0},
-  "costi_oneri":      {"status":"found|not_found","summary":"text or null","confidence":0.0-1.0},
-  "difformita":       {"status":"found|not_found","summary":"text or null","confidence":0.0-1.0},
-  "riassunto":        {"paragrafo1":"property & value","paragrafo2":"risks & costs","paragrafo3":"acts & actions"},
+  "atti_antecedenti": {"status":"found|not_found","summary":"testo or null","confidence":0.0-1.0},
+  "costi_oneri":      {"status":"found|not_found","summary":"testo or null","confidence":0.0-1.0},
+  "difformita":       {"status":"found|not_found","summary":"testo or null","confidence":0.0-1.0},
+  "riassunto":        {"paragrafo1":"immobile e valore","paragrafo2":"rischi e costi","paragrafo3":"atti e azioni consigliate"},
   "resoconto": {
-    "identificazione":   {"trovato":true|false,"valore":"tipo, indirizzo, comune","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa"},
-    "dati_catastali":    {"trovato":true|false,"valore":"foglio/particella/sub/cat/rendita","cosa_dice":null,"cosa_significa":null,"estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa"},
-    "superfici":         {"trovato":true|false,"valore":"comm/catastale/utile mq","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
-    "titolarita":        {"trovato":true|false,"valore":"intestatario e quota","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
-    "vincoli_ipoteche":  {"trovato":true|false,"valore":"ipoteche/pignoramenti/servitù","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
-    "stato_occupativo":  {"trovato":true|false,"valore":"libero/occupato/contratto","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
-    "conformita":        {"trovato":true|false,"valore":"conforme/difformità/abusi","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
-    "stato_manutentivo": {"trovato":true|false,"valore":"condizioni/impianti/energia","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
-    "spese_condominio":  {"trovato":true|false,"valore":"spese/arretrati importi","cosa_dice":null,"cosa_significa":null,"estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa"},
-    "valutazione":       {"trovato":true|false,"valore":"valore stima/base asta","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa"},
-    "rischi":    [{"descrizione":"rischio breve","severita":"Alta|Media|Bassa","cosa_significa":"1 frase semplice per compratore"}],
-    "checklist": ["verifica 1","verifica 2"]
+    "identificazione":   {"trovato":true|false,"valore":"tipo, indirizzo, comune","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa","azioni_consigliate":"1 frase pratica"},
+    "dati_catastali":    {"trovato":true|false,"valore":"foglio/particella/sub/cat/rendita","cosa_dice":null,"cosa_significa":null,"estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa","azioni_consigliate":null},
+    "superfici":         {"trovato":true|false,"valore":"comm/catastale/utile mq","cosa_dice":null,"cosa_significa":"nota su discordanze se presenti","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":null},
+    "titolarita":        {"trovato":true|false,"valore":"intestatario e quota","cosa_dice":"max 1 frase","cosa_significa":"max 1 frase","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"verifica da fare"},
+    "vincoli_ipoteche":  {"trovato":true|false,"valore":"tipo e importo totale vincoli","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase impatto compratore","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"azione concreta pre-offerta"},
+    "stato_occupativo":  {"trovato":true|false,"valore":"libero/occupato/contratto","cosa_dice":"max 1 frase","cosa_significa":"impatto tempi e costi","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"contatta custode o verifica contratto"},
+    "conformita":        {"trovato":true|false,"valore":"conforme/difformità/abusi","cosa_dice":"max 2 frasi","cosa_significa":"rischio pratico","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"richiedi titoli in Comune"},
+    "stato_manutentivo": {"trovato":true|false,"valore":"condizioni/impianti/APE","cosa_dice":"max 1 frase","cosa_significa":"stima costi lavori","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"sopralluogo con tecnico"},
+    "spese_condominio":  {"trovato":true|false,"valore":"spese annue/arretrati importi","cosa_dice":"max 1 frase","cosa_significa":"onere per acquirente","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"richiedi estratto conto condominiale"},
+    "valutazione":       {"trovato":true|false,"valore":"valore stima/base asta","cosa_dice":"max 2 frasi sul metodo","cosa_significa":"max 1 frase su convenienza","estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa","azioni_consigliate":null},
+    "rischi": [
+      {
+        "descrizione": "rischio breve e chiaro",
+        "severita": "Alta|Media|Bassa",
+        "dimensione_impatto": ["Legale","Economico","Tecnico","Tempo"],
+        "perche": "1-2 frasi che spiegano la causa e il meccanismo del rischio",
+        "cosa_fare": "azione concreta che il compratore deve fare",
+        "cosa_significa": "1 frase semplice per un non-esperto"
+      }
+    ],
+    "checklist": ["verifica specifica 1","verifica specifica 2"],
+    "vincoli_dettaglio": [
+      {"tipo":"Ipoteca|Pignoramento|Servitù|Vincolo","importo":"€ 150.000 or null","soggetto":"Banca X or null","data":"2015 or null","severita":"Alta|Media|Bassa","note_operative":"cosa succede in asta / chi cancella / costi"}
+    ]
   }
 }
 
 Rules:
 - confidence: 1.0=explicit, 0.7=inferred, 0.4=uncertain
-- if not found → set trovato=false, all text fields null
-- riassunto: 3 professional Italian paragraphs
-- rischi: max 5, sorted Alta→Bassa; cosa_significa in plain Italian for a non-expert buyer
-- checklist: 8-12 concrete pre-bid verification steps
-- cosa_dice/cosa_significa: null for sections where they add no value (dati catastali, superfici)
-- estratto: verbatim words from the source text, max 25 words, null if not applicable`;
+- if not found → trovato=false, all text fields null, azioni_consigliate=null
+- riassunto: 3 professional Italian paragraphs; paragrafo3 must include practical actions for the buyer
+- rischi: max 6, sorted Alta→Bassa; include ALL dimensions of impact found; perche/cosa_fare must be actionable
+- checklist: 8-12 SPECIFIC pre-bid steps for THIS property (not generic)
+- vincoli_dettaglio: list each individual lien/encumbrance separately, null array [] if none found
+- cosa_dice/cosa_significa/azioni_consigliate: null for sections where no meaningful content (dati catastali, superfici unless anomalies)
+- estratto: verbatim words from source text, max 25 words, null if not applicable`;
 
 // ---------------------------------------------------------------------------
 // Retry on 429

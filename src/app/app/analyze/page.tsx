@@ -864,6 +864,9 @@ export default function AnalizzaPage() {
                 pages_analyzed: (meta.pages_analyzed as number) ?? 0,
                 notes: `Textract + Claude Haiku · ${meta.total_pages ?? 0} pag.`,
               },
+              resoconto_completo: raw.resoconto
+                ? (raw.resoconto as AnalysisResult['resoconto_completo'])
+                : undefined,
             };
 
             setResult(mapped);

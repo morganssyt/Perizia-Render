@@ -11,7 +11,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 
 const MODEL    = 'claude-haiku-4-5-20251001';
-const MAX_TOKENS = 4096;
+const MAX_TOKENS = 8192;
 const MAX_TEXT_CHARS = 80_000;
 
 let _client: Anthropic | null = null;
@@ -25,6 +25,17 @@ function getClient(): Anthropic {
 }
 
 // ── Zod schemas ──────────────────────────────────────────────────────────────
+
+const ResocontoFieldZW = z.object({
+  trovato:             z.boolean().default(false),
+  valore:              z.string().nullable().default(null),
+  cosa_dice:           z.string().nullable().default(null),
+  cosa_significa:      z.string().nullable().default(null),
+  estratto:            z.string().nullable().default(null),
+  pagina_rif:          z.string().nullable().default(null),
+  confidenza:          z.enum(['Alta', 'Media', 'Bassa']).default('Media'),
+  azioni_consigliate:  z.string().nullable().optional(),
+});
 
 const ExtractionSchema = z.object({
   valore_perito: z.object({
@@ -52,6 +63,35 @@ const ExtractionSchema = z.object({
     paragrafo2: z.string(),
     paragrafo3: z.string(),
   }),
+  resoconto: z.object({
+    identificazione:   ResocontoFieldZW,
+    dati_catastali:    ResocontoFieldZW,
+    superfici:         ResocontoFieldZW,
+    titolarita:        ResocontoFieldZW,
+    vincoli_ipoteche:  ResocontoFieldZW,
+    stato_occupativo:  ResocontoFieldZW,
+    conformita:        ResocontoFieldZW,
+    stato_manutentivo: ResocontoFieldZW,
+    spese_condominio:  ResocontoFieldZW,
+    valutazione:       ResocontoFieldZW,
+    rischi: z.array(z.object({
+      descrizione:         z.string(),
+      severita:            z.enum(['Alta', 'Media', 'Bassa']),
+      cosa_significa:      z.string(),
+      dimensione_impatto:  z.array(z.string()).optional().default([]),
+      perche:              z.string().nullable().optional(),
+      cosa_fare:           z.string().nullable().optional(),
+    })).default([]),
+    checklist:          z.array(z.string()).default([]),
+    vincoli_dettaglio:  z.array(z.object({
+      tipo:           z.string(),
+      importo:        z.string().nullable().optional(),
+      soggetto:       z.string().nullable().optional(),
+      data:           z.string().nullable().optional(),
+      severita:       z.enum(['Alta', 'Media', 'Bassa']).nullable().optional(),
+      note_operative: z.string().nullable().optional(),
+    })).optional().default([]),
+  }).optional(),
 });
 
 const ReasoningSchema = z.object({
@@ -96,6 +136,8 @@ export interface ExtractionResult {
   costi_oneri:      { status: 'found' | 'not_found'; summary: string | null; confidence: number };
   difformita:       { status: 'found' | 'not_found'; summary: string | null; confidence: number };
   riassunto:        { paragrafo1: string; paragrafo2: string; paragrafo3: string };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resoconto?:       Record<string, any>;
 }
 export interface ReasoningResult {
   risk_score:       number;
@@ -164,40 +206,49 @@ async function parseWithRetry<T>(
 
 // ── Step 1: Extraction ────────────────────────────────────────────────────────
 
-const EXTRACTION_SYSTEM = `Sei un analista legale specializzato in perizie immobiliari italiane per aste giudiziarie.
+const EXTRACTION_SYSTEM = `Sei un analista senior specializzato in perizie immobiliari italiane per aste giudiziarie.
 Estrai i dati strutturati dal testo della perizia fornito.
 
-IMPORTANTE — IGNORA COMPLETAMENTE QUESTI WATERMARK/INTESTAZIONI (presenti su ogni pagina, non sono contenuto della perizia):
-- "Portale delle Vendite Pubbliche" / "Portale Vendite Pubbliche"
-- "Pubblicazione Ufficiale" / "Pubblicazione ufficiale"
-- "Ministero della Giustizia"
-- "ASTE GIUDIZIARIE" / "Aste Giudiziarie"
-- "pvp.giustizia.it"
-- "Tribunale Ordinario di ..."
-- "Decreto Ministeriale"
-- Numeri di pagina isolati (es. "1", "2/15")
-- Qualsiasi testo ripetuto identico su più pagine che non sia contenuto della perizia
+IGNORA WATERMARK: "Portale delle Vendite Pubbliche", "Pubblicazione Ufficiale", "Ministero della Giustizia", "ASTE GIUDIZIARIE", "pvp.giustizia.it", numeri di pagina isolati, testi ripetuti identici su ogni pagina.
 
-Concentrati ESCLUSIVAMENTE sul contenuto sostanziale della perizia: descrizione immobile, valori, catasto, difformità, oneri, stato di possesso, ecc.
+REGOLA CRITICA: Se esiste QUALSIASI dato reale (indirizzo, valore, particella, superficie, ecc.) estrai tutto. Usa confidence bassa (0.4) se parziale.
 
-REGOLA CRITICA: Se il testo contiene ANCHE SOLO UN dato reale della perizia (indirizzo, valore, particella catastale, superficie, stato manutentivo, ecc.), estrai tutto ciò che puoi trovare. NON dichiarare "solo watermark" o "documento non leggibile" se esiste qualsiasi dato reale. Se i dati sono parziali, usa confidence bassa (0.4) e status "found".
-
-Restituisci SOLO JSON valido (nessun markdown, nessuna spiegazione):
+Restituisci SOLO JSON valido (nessun markdown):
 
 {
-  "valore_perito": { "status": "found"|"not_found", "value": "€ 250.000,00"|null, "confidence": 0-1 },
-  "atti_antecedenti": { "status": "found"|"not_found", "summary": "<testo>"|null, "confidence": 0-1 },
-  "costi_oneri": { "status": "found"|"not_found", "summary": "<testo>"|null, "confidence": 0-1 },
-  "difformita": { "status": "found"|"not_found", "summary": "<testo>"|null, "confidence": 0-1 },
-  "riassunto": { "paragrafo1": "...", "paragrafo2": "...", "paragrafo3": "..." }
+  "valore_perito": {"status":"found|not_found","value":"€ 250.000,00|null","confidence":0-1},
+  "atti_antecedenti": {"status":"found|not_found","summary":"testo|null","confidence":0-1},
+  "costi_oneri": {"status":"found|not_found","summary":"testo|null","confidence":0-1},
+  "difformita": {"status":"found|not_found","summary":"testo|null","confidence":0-1},
+  "riassunto": {"paragrafo1":"immobile e valore","paragrafo2":"rischi e costi","paragrafo3":"atti e azioni"},
+  "resoconto": {
+    "identificazione":   {"trovato":true|false,"valore":"tipo, indirizzo, comune","cosa_dice":"max 2 frasi","cosa_significa":"max 1 frase","estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa","azioni_consigliate":"1 frase pratica"},
+    "dati_catastali":    {"trovato":true|false,"valore":"foglio/particella/sub/cat/rendita","cosa_dice":null,"cosa_significa":null,"estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa","azioni_consigliate":null},
+    "superfici":         {"trovato":true|false,"valore":"comm/catastale/utile mq","cosa_dice":null,"cosa_significa":"discordanze se presenti|null","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":null},
+    "titolarita":        {"trovato":true|false,"valore":"intestatario e quota","cosa_dice":"max 1 frase","cosa_significa":"max 1 frase","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"verifica da fare"},
+    "vincoli_ipoteche":  {"trovato":true|false,"valore":"tipo e importo totale vincoli","cosa_dice":"max 2 frasi","cosa_significa":"impatto compratore","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"azione pre-offerta"},
+    "stato_occupativo":  {"trovato":true|false,"valore":"libero/occupato/contratto","cosa_dice":"max 1 frase","cosa_significa":"impatto tempi/costi","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"contatta custode"},
+    "conformita":        {"trovato":true|false,"valore":"conforme/difformità/abusi","cosa_dice":"max 2 frasi","cosa_significa":"rischio pratico","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"richiedi titoli in Comune"},
+    "stato_manutentivo": {"trovato":true|false,"valore":"condizioni/impianti/APE","cosa_dice":"max 1 frase","cosa_significa":"stima costi lavori","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"sopralluogo con tecnico"},
+    "spese_condominio":  {"trovato":true|false,"valore":"spese annue/arretrati importi","cosa_dice":"max 1 frase","cosa_significa":"onere acquirente","estratto":null,"pagina_rif":null,"confidenza":"Alta|Media|Bassa","azioni_consigliate":"richiedi estratto conto"},
+    "valutazione":       {"trovato":true|false,"valore":"valore stima/base asta","cosa_dice":"max 2 frasi metodo","cosa_significa":"convenienza","estratto":"max 25 parole verbatim","pagina_rif":"Pagina X","confidenza":"Alta|Media|Bassa","azioni_consigliate":null},
+    "rischi": [
+      {"descrizione":"rischio breve","severita":"Alta|Media|Bassa","dimensione_impatto":["Legale","Economico","Tecnico","Tempo"],"perche":"1-2 frasi","cosa_fare":"azione concreta","cosa_significa":"1 frase semplice"}
+    ],
+    "checklist": ["verifica specifica 1","verifica specifica 2"],
+    "vincoli_dettaglio": [
+      {"tipo":"Ipoteca|Pignoramento|Servitù|Vincolo","importo":"€ 150.000|null","soggetto":"soggetto|null","data":"2015|null","severita":"Alta|Media|Bassa","note_operative":"cosa succede in asta"}
+    ]
+  }
 }
 
 Regole:
-- confidence: 1.0=chiaro, 0.7=parziale, 0.4=incerto/dedotto
-- se not_found → value/summary=null
-- valore_perito.value formato: "€ 250.000,00"
-- riassunto: 3 paragrafi professionali in italiano — descrivi l'immobile, il valore e i rischi reali trovati nel documento. Se alcune sezioni mancano, indicalo nel riassunto spiegando cosa manca (non il motivo "watermark")
-- Non menzionare mai "watermark" o "intestazioni" nel riassunto — quelli sono artefatti tecnici già filtrati`;
+- confidence: 1.0=chiaro, 0.7=parziale, 0.4=incerto
+- se not_found → value/summary=null; se sezione non trovata → trovato=false, campi null
+- rischi: max 6, sorted Alta→Bassa; perche/cosa_fare obbligatori e specifici
+- checklist: 8-12 verifiche SPECIFICHE per questa perizia
+- vincoli_dettaglio: array vuoto [] se nessun vincolo trovato
+- Non menzionare mai "watermark" nei testi`;
 
 // ── Step 2: Reasoning ─────────────────────────────────────────────────────────
 
@@ -252,8 +303,16 @@ export async function analyzeWithClaude(pageTexts: string[]): Promise<FullAnalys
     return callClaude('Sei un assistente JSON. Restituisci SOLO JSON valido.', repairPrompt);
   };
 
-  const extraction = await parseWithRetry(raw1, ExtractionSchema, repairExtraction) as unknown as ExtractionResult;
-  console.log(`[claude] Step 1 done: valore_perito=${extraction.valore_perito.status}`);
+  const extractionRaw = await parseWithRetry(raw1, ExtractionSchema, repairExtraction);
+  const extraction: ExtractionResult = {
+    valore_perito:    extractionRaw.valore_perito,
+    atti_antecedenti: extractionRaw.atti_antecedenti,
+    costi_oneri:      extractionRaw.costi_oneri,
+    difformita:       extractionRaw.difformita,
+    riassunto:        extractionRaw.riassunto,
+    resoconto:        extractionRaw.resoconto,
+  };
+  console.log(`[claude] Step 1 done: valore_perito=${extraction.valore_perito.status} resoconto=${extraction.resoconto ? 'yes' : 'no'}`);
 
   // ── Step 2: Reasoning ─────────────────────────────────────────────────────
   const userMsg2 = `Sulla base di questa analisi estratta, fornisci ragionamento e scenari:\n\n${JSON.stringify(extraction, null, 2)}`;
