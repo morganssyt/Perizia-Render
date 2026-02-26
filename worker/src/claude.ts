@@ -104,9 +104,19 @@ const ReasoningSchema = z.object({
   checklist: z.array(z.object({
     item:      z.string(),
     done:      z.boolean().default(false),
-    priority:  z.enum(['alta', 'media', 'bassa']).default('media'),
+    priority:  z.string().transform(v => {
+      const l = (v ?? '').toLowerCase();
+      if (l === 'alta' || l === 'alta' || l === 'high' || l === 'critica' || l === 'critical') return 'alta';
+      if (l === 'bassa' || l === 'low') return 'bassa';
+      return 'media';
+    }),
   })).default([]),
-  sintesi_esito: z.enum(['verde', 'giallo', 'rosso']),
+  sintesi_esito: z.string().transform(v => {
+    const l = (v ?? '').toLowerCase();
+    if (l === 'rosso' || l === 'red') return 'rosso';
+    if (l === 'verde' || l === 'green') return 'verde';
+    return 'giallo';
+  }),
 });
 
 // Normalize reasoning object before Zod validation.
@@ -331,9 +341,9 @@ export async function analyzeWithClaude(pageTexts: string[]): Promise<FullAnalys
     checklist:       (reasoningRaw.checklist ?? []).map(c => ({
       item:     c.item,
       done:     c.done     ?? false,
-      priority: c.priority ?? 'media',
+      priority: (c.priority ?? 'media') as 'alta' | 'media' | 'bassa',
     })),
-    sintesi_esito:   reasoningRaw.sintesi_esito,
+    sintesi_esito:   reasoningRaw.sintesi_esito as 'verde' | 'giallo' | 'rosso',
   };
   console.log(`[claude] Step 2 done: risk_score=${reasoning.risk_score} esito=${reasoning.sintesi_esito}`);
 

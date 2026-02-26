@@ -191,6 +191,16 @@ function callout(doc: any, type: CalloutType, title: string, text: string): void
   doc.y = y + boxH + 6;
 }
 
+// Start a new chapter: new page only if current page has meaningful content (> 150px used)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function chapterBreak(doc: any): void {
+  if (doc.y > 150) {
+    doc.addPage();
+  } else {
+    doc.moveDown(1.5);
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function drawTable(doc: any, headers: string[], widths: number[], rows: string[][]): void {
   const PAD     = 6;
@@ -537,13 +547,13 @@ export async function generateAnalysisPdf(payload: PdfPayload): Promise<Buffer> 
       renderSection(doc, '2', 'Stato manutentivo e impianti',     rc.stato_manutentivo);
 
       // ─── 3. Dati catastali ──────────────────────────────────────────────────
-      doc.addPage();
+      chapterBreak(doc);
       chapterBar(doc, '3.', 'Dati Catastali');
       renderSection(doc, '1', 'Identificazione catastale', rc.dati_catastali);
       renderSection(doc, '2', 'Superfici',                 rc.superfici);
 
       // ─── 4. Titolarità ──────────────────────────────────────────────────────
-      doc.addPage();
+      chapterBreak(doc);
       chapterBar(doc, '4.', 'Titolarità');
       renderSection(doc, '1', 'Proprietà e quote', rc.titolarita);
       if (rc.atti_antecedenti) {
@@ -554,7 +564,7 @@ export async function generateAnalysisPdf(payload: PdfPayload): Promise<Buffer> 
       }
 
       // ─── 5. Vincoli e gravami ───────────────────────────────────────────────
-      doc.addPage();
+      chapterBreak(doc);
       chapterBar(doc, '5.', 'Vincoli e Gravami');
       renderSection(doc, '1', 'Ipoteche, pignoramenti, servitù', rc.vincoli_ipoteche);
 
@@ -575,7 +585,7 @@ export async function generateAnalysisPdf(payload: PdfPayload): Promise<Buffer> 
         'Verifica il piano di riparto con il professionista delegato.');
 
       // ─── 6. Conformità ──────────────────────────────────────────────────────
-      doc.addPage();
+      chapterBreak(doc);
       chapterBar(doc, '6.', 'Conformità Urbanistica e Edilizia');
       renderSection(doc, '1', 'Conformità urbanistica', rc.conformita);
       if (rc.difformita) {
@@ -588,7 +598,7 @@ export async function generateAnalysisPdf(payload: PdfPayload): Promise<Buffer> 
       }
 
       // ─── 7. Stato occupativo + Spese ────────────────────────────────────────
-      doc.addPage();
+      chapterBreak(doc);
       chapterBar(doc, '7.', 'Stato Occupativo e Spese');
       renderSection(doc, '1', 'Stato occupativo',         rc.stato_occupativo);
       renderSection(doc, '2', 'Spese condominiali e oneri', rc.spese_condominio);
@@ -598,7 +608,7 @@ export async function generateAnalysisPdf(payload: PdfPayload): Promise<Buffer> 
       }
 
       // ─── 8. Valutazione economica ────────────────────────────────────────────
-      doc.addPage();
+      chapterBreak(doc);
       chapterBar(doc, '8.', 'Valutazione Economica');
       renderSection(doc, '1', 'Valutazione e base d\'asta', rc.valutazione);
 
